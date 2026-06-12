@@ -66,11 +66,18 @@ export interface LandingOptions {
 
 /** User profile info. */
 export interface UserInfo {
-  id: string;
+  user_id: number;
+  username: string;
   email: string;
-  name: string | null;
-  picture: string | null;
   plan: string;
+  planName: string;
+  role: string;
+  subscription: unknown;
+  usage: {
+    links: { used: number; limit: number | null };
+    aiSlugs: { used: number; limit: number | null };
+    landingPages: { used: number; limit: number | null };
+  };
 }
 
 /** Auth token stored locally. */

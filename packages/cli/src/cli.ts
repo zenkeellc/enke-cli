@@ -52,9 +52,9 @@ Examples:
 `);
 }
 
-function parseArgs(): Record<string, string> {
+export function parseArgs(argv?: string[]): Record<string, string> {
   const opts: Record<string, string> = {};
-  const args = process.argv.slice(2);
+  const args = (argv ?? process.argv).slice(2);
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith("--")) {
       let key: string;
@@ -74,9 +74,9 @@ function parseArgs(): Record<string, string> {
   return opts;
 }
 
-function getPositionalArgs(): string[] {
+export function getPositionalArgs(argv?: string[]): string[] {
   const result: string[] = [];
-  const args = process.argv.slice(2);
+  const args = (argv ?? process.argv).slice(2);
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith("--")) {
       if (args[i + 1] && !args[i + 1].startsWith("--")) i++;
@@ -113,7 +113,7 @@ async function main(): Promise<void> {
         console.log("Opening browser for login...");
         const cfg = await login();
         console.log(`✓ Logged in. Token valid until ${new Date(cfg.expiresAt * 1000).toLocaleString()}`);
-        break;
+        process.exit(0);
       }
       case "logout": {
         logout();
@@ -123,8 +123,9 @@ async function main(): Promise<void> {
       case "whoami": {
         const user = await whoami();
         console.log(`  Email:  ${user.email}`);
-        console.log(`  Name:   ${user.name ?? "(not set)"}`);
-        console.log(`  Plan:   ${user.plan}`);
+        console.log(`  Name:   ${user.username}`);
+        console.log(`  Plan:   ${user.planName} (${user.plan})`);
+        console.log(`  Role:   ${user.role}`);
         break;
       }
 
@@ -328,14 +329,19 @@ async function main(): Promise<void> {
   }
 }
 
-// Quick check for login state on any command except login/logout/help
-const cmd = process.argv[2];
-if (cmd && !["login", "logout", "help", "--help", "-h"].includes(cmd)) {
-  const cfg = loadConfig();
-  if (!cfg) {
-    console.error("Not logged in. Run 'enke login' first.");
-    process.exit(1);
-  }
-}
+// Only auto-execute when run as a script (not when imported for testing)
+const isMainModule = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
 
-main();
+if (isMainModule) {
+  // Quick check for login state on any command except login/logout/help
+  const cmd = process.argv[2];
+  if (cmd && !["login", "logout", "help", "--help", "-h"].includes(cmd)) {
+    const cfg = loadConfig();
+    if (!cfg) {
+      console.error("Not logged in. Run 'enke login' first.");
+      process.exit(1);
+    }
+  }
+
+  main();
+}
