@@ -2,6 +2,7 @@ import { getToken, API_URL } from "./auth.js";
 import type {
   ShortLink, ShortenOptions, UpdateOptions, ListFilter,
   LinkStats, LandingPage, LandingOptions, UserInfo,
+  DocShare, DocUploadOptions, DocUpdateOptions, DocListResponse,
 } from "./types.js";
 
 class EnkeError extends Error {
@@ -93,6 +94,96 @@ export async function createLanding(opts: LandingOptions): Promise<LandingPage> 
 export async function whoami(): Promise<UserInfo> {
   const data = await request<{ data: UserInfo }>("GET", "/api/v1/me");
   return data.data;
+}
+
+// ── Document Share ──
+
+/** Upload a document for sharing. Takes file path; reads and streams it. */
+export async function uploadDoc(
+  filePath: string,
+  filename: string,
+  opts?: DocUploadOptions,
+): Promise<DocShare> {
+  const token = await getToken();
+  if (!token) throw new EnkeError("Not logged in. Run: enke login", 401);
+
+  // Build a simple multipart form manually to avoid DOM API dependencies
+  const boundary = `----EnkeUpload${Math.random().toString(36).slice(2)}`;
+  const fs = await import("node:fs");
+  const content = fs.readFileSync(filePath);
+
+  const parts: Buffer[] = [];
+  parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`));
+  parts.push(content);
+  if (opts) {
+    const metaJson = JSON.stringify(opts);
+    parts.push(Buffer.from(`\r\n--${boundary}\r\nContent-Disposition: form-data; name="metadata"\r\n\r\n${metaJson}`));
+  }
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+  const body = Buffer.concat(parts);
+
+  const res = await fetch(`${API_URL}/api/v1/docs`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+    },
+    body,
+  });
+
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "Unknown error");
+    throw new EnkeError(msg, res.status);
+  }
+
+  const data = await res.json() as { success: boolean; result: { doc: DocShare } };
+  return data.result.doc;
+}
+
+/** List documents. */
+export async function listDocs(cursor?: string, limit?: number): Promise<DocListResponse> {
+  const params = new URLSearchParams();
+  if (cursor) params.set("cursor", cursor);
+  if (limit) params.set("limit", String(limit));
+  const qs = params.toString();
+  const data = await request<DocListResponse>("GET", `/api/v1/docs${qs ? `?${qs}` : ""}`);
+  return data;
+}
+
+/** Get a single document. */
+export async function getDoc(slug: string): Promise<DocShare> {
+  const data = await request<DocShare>("GET", `/api/v1/docs/${encodeURIComponent(slug)}`);
+  return data;
+}
+
+/** Delete a document (irreversible). */
+export async function deleteDoc(slug: string): Promise<void> {
+  await request<unknown>("DELETE", `/api/v1/docs/${encodeURIComponent(slug)}`);
+}
+
+/** Update document settings. */
+export async function updateDoc(slug: string, opts: DocUpdateOptions): Promise<DocShare> {
+  const data = await request<{ success: boolean; result: { doc: DocShare } }>(
+    "PUT", `/api/v1/docs/${encodeURIComponent(slug)}`, opts,
+  );
+  return data.result.doc;
+}
+
+/** Renew a document (reset expiration). */
+export async function renewDoc(slug: string): Promise<DocShare> {
+  const data = await request<{ success: boolean; result: { doc: DocShare } }>(
+    "POST", `/api/v1/docs/${encodeURIComponent(slug)}/renew`,
+  );
+  return data.result.doc;
+}
+
+/** Edit document expiration days. */
+export async function editDocExpiration(slug: string, expDays: number): Promise<DocShare> {
+  const data = await request<{ success: boolean; result: { doc: DocShare } }>(
+    "POST", `/api/v1/docs/${encodeURIComponent(slug)}/expiration`,
+    { exp_days: expDays },
+  );
+  return data.result.doc;
 }
 
 export { EnkeError };
