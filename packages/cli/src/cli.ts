@@ -42,8 +42,17 @@ function parseArgs(): Record<string, string> {
   const args = process.argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith("--")) {
-      const key = args[i].slice(2);
-      const val = args[i + 1] && !args[i + 1].startsWith("--") ? args[++i] : "true";
+      let key: string;
+      let val: string;
+      const eqIdx = args[i].indexOf("=");
+      if (eqIdx >= 0) {
+        // --flag=value format
+        key = args[i].slice(2, eqIdx);
+        val = args[i].slice(eqIdx + 1);
+      } else {
+        key = args[i].slice(2);
+        val = args[i + 1] && !args[i + 1].startsWith("--") ? args[++i] : "true";
+      }
       opts[key] = val;
     }
   }
