@@ -31,10 +31,8 @@ fi
 # ── 2. Run tests ──
 
 echo "--- Running tests ---"
-npx vitest run --reporter=verbose -w packages/sdk -w packages/cli 2>&1 || {
-  echo "Error: tests failed. Fix before releasing."
-  exit 1
-}
+(cd packages/sdk && npx vitest run --reporter=verbose) 2>&1 || { echo "Error: SDK tests failed."; exit 1; }
+(cd packages/cli && npx vitest run --reporter=verbose) 2>&1 || { echo "Error: CLI tests failed."; exit 1; }
 
 # ── 3. Type-check ──
 
