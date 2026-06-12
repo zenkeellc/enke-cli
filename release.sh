@@ -49,7 +49,7 @@ if command -v gh &> /dev/null; then
     --notes "## enke CLI v$VERSION
 
 ### Packages
-- \`@enke/sdk@$VERSION\` — shared auth, API client, types
+- \`enke-sdk@$VERSION\` — shared auth, API client, types
 - \`enke-cli@$VERSION\` — CLI tool
 
 ### Install
