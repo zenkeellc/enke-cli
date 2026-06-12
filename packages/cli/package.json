@@ -1,6 +1,6 @@
 {
   "name": "enke-cli",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "en.ke CLI — secure link & context relay for AI agents",
   "type": "module",
   "bin": {
