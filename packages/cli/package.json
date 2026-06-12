@@ -1,19 +1,21 @@
 {
   "name": "enke-cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "en.ke CLI — secure link & context relay for AI agents",
   "type": "module",
   "bin": {
     "enke": "./dist/cli.js"
   },
   "main": "dist/cli.js",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@zenkee/enke-sdk": "*"
+    "enke-sdk": "*"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
@@ -25,5 +27,11 @@
     "url": "git@github-zenkee:zenkeellc/enke-cli.git",
     "directory": "packages/cli"
   },
-  "keywords": ["enke", "cli", "url-shortener", "link-management", "ai-agent"]
+  "keywords": [
+    "enke",
+    "cli",
+    "url-shortener",
+    "link-management",
+    "ai-agent"
+  ]
 }

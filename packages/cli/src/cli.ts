@@ -4,7 +4,7 @@ import {
   login, logout, loadConfig,
   shorten, listLinks, getLink, deleteLink, updateLink, getLinkStats,
   createLanding, whoami, EnkeError,
-} from "@zenkee/enke-sdk";
+} from "enke-sdk";
 
 function help(): void {
   console.log(`en.ke — secure link & context relay for AI agents
@@ -225,7 +225,7 @@ async function main(): Promise<void> {
         const target = args[2];
         if (!sub) { console.error("Usage: enke doc <upload|list|get|delete|update|renew|expire> [...]"); process.exit(1); }
 
-        const { uploadDoc, listDocs, getDoc, deleteDoc, updateDoc, renewDoc, editDocExpiration } = await import("@zenkee/enke-sdk");
+        const { uploadDoc, listDocs, getDoc, deleteDoc, updateDoc, renewDoc, editDocExpiration } = await import("enke-sdk");
 
         switch (sub) {
           case "upload": {
