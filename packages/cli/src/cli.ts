@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { realpathSync } from "node:fs";
 import {
   login, logout, loadConfig,
   shorten, listLinks, deleteLink, updateLink, getLinkStats,
@@ -351,8 +352,18 @@ async function main(): Promise<void> {
   }
 }
 
-// Only auto-execute when run as a script (not when imported for testing)
-const isMainModule = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
+// Only auto-execute when run as a script (not when imported for testing).
+// Uses realpathSync to resolve symlinks (e.g. /opt/homebrew/bin/enke → .../dist/cli.js).
+const isMainModule = (() => {
+  if (!process.argv[1]) return false;
+  try {
+    const real = realpathSync(process.argv[1]);
+    return import.meta.url.endsWith(real.replace(/\\/g, '/'));
+  } catch {
+    // If realpath fails (e.g., file doesn't exist), fall back to argv[1]
+    return import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
+  }
+})();
 
 if (isMainModule) {
   // Quick check for login state on any command except login/logout/help
