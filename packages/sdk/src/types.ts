@@ -1,70 +1,164 @@
-/** A shortened link as returned by the API. */
+/** A shortened link — consumer-facing (built by client.ts from API responses). */
 export interface ShortLink {
+  uid: string;
   id: string;
   url: string;
-  shortUrl: string;
   slug: string;
-  createdAt: string;
-  expiresAt: string | null;
-  clicks: number;
+  /** Computed: https://en.ke/{slug} */
+  shortUrl: string;
+  /** Owner-facing note. */
+  comment?: string;
+  /** Unix timestamp (seconds) when created. */
+  ctime: number;
+  /** Unix timestamp (seconds) when last modified. */
+  mtime: number;
+  /** Expiration in days from ctime. */
+  exp_days: number;
+  /** Hash of password if protected. */
+  password?: string;
+  /** Is the link password-protected? */
   passwordProtected: boolean;
+  /** Computed: ISO string from ctime. */
+  createdAt: string;
+  /** Computed: ISO string from ctime + exp_days, or null if perpetual. */
+  expiresAt: string | null;
+  /** Social preview title. */
+  title?: string;
+  /** Social preview description. */
+  description?: string;
+  /** Social preview image URL. */
+  image?: string;
+  /** Device/geo targeting rules. */
+  rules?: TargetingRule[];
+  /** A/B test variants. */
+  ab_targets?: ABTarget[];
+  /** Preview/interstitial page settings. */
+  preview?: LinkPreview;
 }
 
-/** Options for creating a short link. */
+/** A targeting rule for device/geo-based redirects. */
+export interface TargetingRule {
+  type: "country" | "device";
+  value: string;
+  url: string;
+}
+
+/** An A/B test variant with a relative weight. */
+export interface ABTarget {
+  url: string;
+  weight: number;
+}
+
+/** Per-link preview/interstitial page settings. */
+export interface LinkPreview {
+  enabled: boolean;
+  title?: string;
+  message?: string;
+  delay_seconds: number;
+  show_branding: boolean;
+  show_destination: boolean;
+}
+
+/** Options for creating a short link — matches API's CreateLinkReq. */
 export interface ShortenOptions {
   /** Custom slug (back-half). Auto-generated if omitted. */
   slug?: string;
-  /** Password protect the link. */
+  /** Duration in days to keep the link (1–365). Defaults to 30. */
+  keep_days?: number;
+  /** Optional password to protect the link (min 4 chars). */
   password?: string;
-  /** Expiration: ISO date string, or duration like "7d", "24h", "30d". */
-  expiresIn?: string;
-  /** Webhook URL called when the link is clicked. */
-  webhookUrl?: string;
+  /** Device/geo targeting rules. */
+  rules?: TargetingRule[];
+  /** A/B test variants. */
+  ab_targets?: ABTarget[];
+  /** Preview/interstitial page settings. */
+  preview?: LinkPreview;
 }
 
-/** Options for updating a short link. */
+/** Options for updating a short link — matches API's LinkEditReq. */
 export interface UpdateOptions {
-  slug?: string;
+  /** New redirect URL. */
+  url?: string;
+  /** New password (empty string = remove). */
   password?: string;
-  expiresIn?: string;
-  webhookUrl?: string;
+  /** Device/geo targeting rules. */
+  rules?: TargetingRule[];
+  /** A/B test variants. */
+  ab_targets?: ABTarget[];
+  /** Preview/interstitial page settings. */
+  preview?: LinkPreview;
 }
 
-/** Filters for listing links. */
+/** Filters for listing links — matches API query. */
 export interface ListFilter {
-  limit?: number;
-  offset?: number;
-  search?: string;
+  /** User ID (required by API). */
+  uid: string;
+  /** Pagination cursor (required by API; empty string for first page). */
+  cursor?: string;
 }
 
-/** Click analytics for a link. */
+/** Response from listLinks. */
+export interface LinkListResponse {
+  /** True when there are no more pages. */
+  list_complete: boolean;
+  /** Cursor for the next page (null if list_complete). */
+  cursor: string | null;
+  links: ShortLink[];
+}
+
+/** Click analytics for a link — matches API's linkStatList response. */
 export interface LinkStats {
-  totalClicks: number;
-  daily: Array<{ date: string; count: number }>;
-  referrers: Array<{ source: string; count: number }>;
-  geo: Array<{ country: string; count: number }>;
-  devices: Array<{ type: string; count: number }>;
+  overview: {
+    total_visits: number;
+    unique_countries: number;
+    unique_referers: number;
+  };
+  time_series: Array<{ date: string; visits: number }>;
+  top_countries: Array<{ label: string; count: number; percentage?: number }>;
+  top_referers: Array<{ label: string; count: number; percentage?: number }>;
+  devices: Array<{ label: string; count: number; percentage?: number }>;
+  historical?: {
+    available: boolean;
+    monthly_totals: Array<{ month: string; visits: number }>;
+  };
 }
 
-/** A simple landing page (link-in-bio style). */
+/** A landing page — matches API's LandingPageSchema. */
 export interface LandingPage {
-  id: string;
+  uid: string;
   slug: string;
   title: string;
-  links: Array<{ url: string; label: string }>;
-  theme: string;
-  createdAt: string;
+  description?: string;
+  links: Array<{ title: string; url: string; sort_order: number }>;
+  socials?: Record<string, string | undefined>;
+  theme?: {
+    accent_color: string;
+    background: "light" | "dark" | "gradient";
+    layout: "gallery" | "terminal" | "magazine" | "matrix" | "anime";
+  };
+  avatar_url?: string;
+  ctime: number;
+  mtime: number;
 }
 
-/** Options for creating a landing page. */
+/** Options for creating a landing page — matches API's LandingPageCreateReq. */
 export interface LandingOptions {
-  slug?: string;
+  /** Slug is required by the API. */
+  slug: string;
   title: string;
-  links: Array<{ url: string; label: string }>;
-  theme?: string;
+  description?: string;
+  /** Each link must have `title` (API field name). */
+  links: Array<{ title: string; url: string; sort_order?: number }>;
+  socials?: Record<string, string | undefined>;
+  theme?: {
+    accent_color?: string;
+    background?: "light" | "dark" | "gradient";
+    layout?: "gallery" | "terminal" | "magazine" | "matrix" | "anime";
+  };
+  avatar_url?: string;
 }
 
-/** User profile info. */
+/** User profile info — matches API's /api/v1/me response. */
 export interface UserInfo {
   user_id: number;
   username: string;
@@ -103,7 +197,7 @@ export interface WatermarkSettings {
   repeat: boolean;
 }
 
-/** A shared document. */
+/** A shared document — matches API's DocShare. */
 export interface DocShare {
   uid: string;
   id: string;
