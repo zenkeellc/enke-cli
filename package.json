@@ -1,0 +1,14 @@
+{
+  "name": "enke-tools",
+  "private": true,
+  "workspaces": [
+    "packages/sdk",
+    "packages/cli"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/sdk && npm run build -w packages/cli",
+    "type-check": "npm run type-check -w packages/sdk && npm run type-check -w packages/cli",
+    "publish-sdk": "npm publish -w packages/sdk",
+    "publish-cli": "npm publish -w packages/cli"
+  }
+}

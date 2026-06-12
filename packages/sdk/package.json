@@ -1,0 +1,28 @@
+{
+  "name": "@enke/sdk",
+  "version": "0.1.0",
+  "description": "Shared SDK for en.ke CLI and MCP Server — auth, API client, types",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "open": "^10.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@github-zenkee:zenkeellc/enke-cli.git",
+    "directory": "packages/sdk"
+  },
+  "keywords": ["enke", "url-shortener", "sdk", "api-client"]
+}
