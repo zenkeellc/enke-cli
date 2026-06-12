@@ -92,8 +92,7 @@ export async function createLanding(opts: LandingOptions): Promise<LandingPage> 
 
 /** Get current user info. */
 export async function whoami(): Promise<UserInfo> {
-  const data = await request<{ data: UserInfo }>("GET", "/api/v1/me");
-  return data.data;
+  return request<UserInfo>("GET", "/api/v1/me");
 }
 
 // ── Document Share ──
@@ -112,8 +111,12 @@ export async function uploadDoc(
   const fs = await import("node:fs");
   const content = fs.readFileSync(filePath);
 
+  // Detect MIME type from file extension (supports 1000+ types)
+  const mime = (await import("mime")).default;
+  const contentType = mime.getType(filename) ?? 'application/octet-stream';
+
   const parts: Buffer[] = [];
-  parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`));
+  parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`));
   parts.push(content);
   if (opts) {
     const metaJson = JSON.stringify(opts);
