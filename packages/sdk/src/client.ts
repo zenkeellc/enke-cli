@@ -1,6 +1,6 @@
 import { getToken, API_URL } from "./auth.js";
 import type {
-  ShortLink, ShortenOptions, UpdateOptions, ListFilter,
+  ShortLink, ShortenOptions, UpdateOptions, ListFilter, LinkListResponse,
   LinkStats, LandingPage, LandingOptions, UserInfo,
   DocShare, DocUploadOptions, DocUpdateOptions, DocListResponse,
 } from "./types.js";
@@ -41,54 +41,132 @@ async function request<T>(
   return res.json() as T;
 }
 
+// ── Helpers ──
+
+/** Convert a Unix timestamp (seconds) to ISO string. */
+function tsToIso(ts: number): string {
+  return new Date(ts * 1000).toISOString();
+}
+
+/** Transform an API link object to consumer-facing ShortLink. */
+function toShortLink(raw: Record<string, unknown>): ShortLink {
+  const ctime = (raw.ctime as number) ?? 0;
+  const expDays = (raw.exp_days as number) ?? 30;
+
+  return {
+    uid: String(raw.uid ?? ""),
+    id: String(raw.id ?? raw.slug ?? ""),
+    url: String(raw.url ?? ""),
+    slug: String(raw.slug ?? ""),
+    shortUrl: `https://en.ke/${raw.slug}`,
+    comment: raw.comment as string | undefined,
+    ctime,
+    mtime: (raw.mtime as number) ?? ctime,
+    exp_days: expDays,
+    password: raw.password as string | undefined,
+    passwordProtected: !!raw.password,
+    createdAt: ctime ? tsToIso(ctime) : "",
+    expiresAt: ctime ? tsToIso(ctime + expDays * 86400) : null,
+    title: raw.title as string | undefined,
+    description: raw.description as string | undefined,
+    image: raw.image as string | undefined,
+    rules: raw.rules as ShortLink["rules"],
+    ab_targets: raw.ab_targets as ShortLink["ab_targets"],
+    preview: raw.preview as ShortLink["preview"],
+  };
+}
+
+// ── Links ──
+
 /** Create a new short link. */
 export async function shorten(url: string, opts?: ShortenOptions): Promise<ShortLink> {
-  const data = await request<{ data: ShortLink }>("POST", "/api/v1/links", {
-    url,
-    ...opts,
-  });
-  return data.data;
+  const data = await request<{ success: boolean; link: Record<string, unknown> }>(
+    "POST", "/api/v1/links",
+    {
+      url,
+      ...(opts?.slug ? { slug: opts.slug } : {}),
+      ...(opts?.keep_days ? { keep_days: opts.keep_days } : {}),
+      ...(opts?.password ? { password: opts.password } : {}),
+      ...(opts?.rules ? { rules: opts.rules } : {}),
+      ...(opts?.ab_targets ? { ab_targets: opts.ab_targets } : {}),
+      ...(opts?.preview ? { preview: opts.preview } : {}),
+    },
+  );
+  return toShortLink(data.link);
 }
 
-/** List user's short links. */
-export async function listLinks(filter?: ListFilter): Promise<ShortLink[]> {
+/** List user's short links. uid is required by the API. */
+export async function listLinks(filter: ListFilter): Promise<LinkListResponse> {
   const params = new URLSearchParams();
-  if (filter?.limit) params.set("limit", String(filter.limit));
-  if (filter?.offset) params.set("offset", String(filter.offset));
-  if (filter?.search) params.set("search", filter.search);
+  params.set("uid", filter.uid);
+  params.set("cursor", filter.cursor ?? "");
   const qs = params.toString();
-  const data = await request<{ data: ShortLink[] }>("GET", `/api/v1/links${qs ? `?${qs}` : ""}`);
-  return data.data;
+  const data = await request<{
+    list_complete: boolean;
+    cursor: string | null;
+    links: Record<string, unknown>[];
+  }>("GET", `/api/v1/links?${qs}`);
+  return {
+    list_complete: data.list_complete,
+    cursor: data.cursor,
+    links: (data.links ?? []).map(toShortLink),
+  };
 }
 
-/** Get a single short link by slug or ID. */
-export async function getLink(id: string): Promise<ShortLink> {
-  const data = await request<{ data: ShortLink }>("GET", `/api/v1/links/${encodeURIComponent(id)}`);
-  return data.data;
+/** Get a single short link by slug. */
+export async function getLink(slug: string): Promise<ShortLink> {
+  const data = await request<Record<string, unknown>>(
+    "GET", `/api/v1/links/${encodeURIComponent(slug)}`,
+  );
+  return toShortLink(data);
 }
 
 /** Delete (revoke) a short link. */
-export async function deleteLink(id: string): Promise<void> {
-  await request<unknown>("DELETE", `/api/v1/links/${encodeURIComponent(id)}`);
+export async function deleteLink(slug: string): Promise<void> {
+  await request<unknown>("DELETE", `/api/v1/links/${encodeURIComponent(slug)}`);
 }
 
 /** Update a short link's properties. */
-export async function updateLink(id: string, opts: UpdateOptions): Promise<ShortLink> {
-  const data = await request<{ data: ShortLink }>("PATCH", `/api/v1/links/${encodeURIComponent(id)}`, opts);
-  return data.data;
+export async function updateLink(slug: string, opts: UpdateOptions): Promise<ShortLink> {
+  const data = await request<{
+    success: boolean;
+    result: { link: Record<string, unknown> };
+  }>(
+    "PUT", `/api/v1/links/${encodeURIComponent(slug)}`,
+    {
+      ...(opts.url !== undefined ? { url: opts.url } : {}),
+      ...(opts.password !== undefined ? { password: opts.password } : {}),
+      ...(opts.rules !== undefined ? { rules: opts.rules } : {}),
+      ...(opts.ab_targets !== undefined ? { ab_targets: opts.ab_targets } : {}),
+      ...(opts.preview !== undefined ? { preview: opts.preview } : {}),
+    },
+  );
+  return toShortLink(data.result.link);
 }
 
 /** Get click analytics for a link. */
-export async function getLinkStats(id: string): Promise<LinkStats> {
-  const data = await request<{ data: LinkStats }>("GET", `/api/v1/links/${encodeURIComponent(id)}/stats`);
-  return data.data;
+export async function getLinkStats(slug: string, uid?: string): Promise<LinkStats> {
+  const params = new URLSearchParams();
+  if (uid) params.set("uid", uid);
+  const qs = params.toString();
+  const data = await request<LinkStats>(
+    "GET", `/api/v1/link_stat/${encodeURIComponent(slug)}${qs ? `?${qs}` : ""}`,
+  );
+  return data;
 }
 
-/** Create a landing page. */
+// ── Landing Pages ──
+
+/** Create or update a landing page. */
 export async function createLanding(opts: LandingOptions): Promise<LandingPage> {
-  const data = await request<{ data: LandingPage }>("POST", "/api/v1/landing", opts);
-  return data.data;
+  const data = await request<{
+    success: boolean;
+    result: { page: LandingPage };
+  }>("POST", "/api/v1/landing", opts);
+  return data.result.page;
 }
+
+// ── User ──
 
 /** Get current user info. */
 export async function whoami(): Promise<UserInfo> {

@@ -2,7 +2,7 @@
 
 import {
   login, logout, loadConfig,
-  shorten, listLinks, getLink, deleteLink, updateLink, getLinkStats,
+  shorten, listLinks, deleteLink, updateLink, getLinkStats,
   createLanding, whoami, EnkeError,
 } from "enke-sdk";
 
@@ -15,13 +15,13 @@ Usage:
   enke whoami                         Show logged-in user info
 
   enke link create <url>              Shorten a URL
-  enke link list [--limit 20]         List your short links
+  enke link list [--cursor <cursor>]  List your short links
   enke link stats <slug>              Click analytics for a link
   enke link delete <slug>             Revoke a short link
   enke link update <slug> [opts]      Update a link's properties
 
-  enke landing create <title>         Create a landing page
-          [--links url1,label1;url2,label2]
+  enke landing create <slug> <title>  Create a landing page
+          [--links url1,title1;url2,title2]
 
   enke doc upload <file>              Share a document
   enke doc list                       List shared documents
@@ -30,11 +30,14 @@ Usage:
   enke doc renew <slug>               Reset document expiration
   enke doc expire <slug> <days>       Set document expiration days
 
-Options (link create/update):
+Options (link create):
   --slug <slug>       Custom back-half
   --password <pwd>    Password-protect
-  --expires <duration>  Expire after: 1h, 24h, 7d, 30d
-  --webhook <url>     Webhook callback on click
+  --keep-days <n>     Keep duration in days (default: 30)
+
+Options (link update):
+  --url <url>         New redirect URL
+  --password <pwd>    New password (empty to remove)
 
 Options (doc upload/update):
   --exp-days <n>      Expiration in days
@@ -46,7 +49,7 @@ Options (doc upload/update):
 
 Examples:
   enke login
-  enke link create https://example.com --slug my-link --expires 7d
+  enke link create https://example.com --slug my-link --keep-days 7
   enke doc upload ./report.pdf --exp-days 7 --password secret123
   enke doc list
 `);
@@ -87,14 +90,23 @@ export function getPositionalArgs(argv?: string[]): string[] {
   return result;
 }
 
-function printLink(link: { slug: string; shortUrl: string; url: string; clicks: number; createdAt: string; expiresAt: string | null }): void {
+function printLink(link: { slug: string; shortUrl: string; url: string; createdAt: string; expiresAt: string | null }): void {
   console.log(`  Slug:       ${link.slug}`);
   console.log(`  Short URL:  ${link.shortUrl}`);
   console.log(`  Target:     ${link.url}`);
-  console.log(`  Clicks:     ${link.clicks}`);
   console.log(`  Created:    ${link.createdAt}`);
   if (link.expiresAt) console.log(`  Expires:    ${link.expiresAt}`);
   console.log();
+}
+
+/** Cached user ID for the session — avoids redundant whoami calls. */
+let _cachedUid: string | null = null;
+
+async function getUid(): Promise<string> {
+  if (_cachedUid) return _cachedUid;
+  const user = await whoami();
+  _cachedUid = String(user.user_id);
+  return _cachedUid;
 }
 
 async function main(): Promise<void> {
@@ -137,40 +149,47 @@ async function main(): Promise<void> {
 
         switch (sub) {
           case "create": {
-            if (!target) { console.error("Usage: enke link create <url> [--slug x] [--expires 7d] [--password x] [--webhook url]"); process.exit(1); }
+            if (!target) { console.error("Usage: enke link create <url> [--slug x] [--keep-days 30] [--password x]"); process.exit(1); }
             const link = await shorten(target, {
               slug: opts.slug,
               password: opts.password,
-              expiresIn: opts.expires,
-              webhookUrl: opts.webhook,
+              keep_days: opts["keep-days"] ? parseInt(opts["keep-days"]) : undefined,
             });
             console.log(`✓ Link created:`);
             printLink(link);
             break;
           }
           case "list": {
-            const links = await listLinks({ limit: opts.limit ? parseInt(opts.limit) : 20 });
-            if (links.length === 0) { console.log("No links yet."); break; }
-            console.log(`Links (${links.length}):\n`);
-            for (const l of links) printLink(l);
+            const uid = await getUid();
+            const result = await listLinks({ uid, cursor: opts.cursor });
+            if (result.links.length === 0) { console.log("No links yet."); break; }
+            console.log(`Links (${result.links.length})${!result.list_complete ? " (more available)" : ""}:\n`);
+            for (const l of result.links) printLink(l);
             break;
           }
           case "stats": {
             if (!target) { console.error("Usage: enke link stats <slug>"); process.exit(1); }
-            const stats = await getLinkStats(target);
+            const uid = await getUid();
+            const stats = await getLinkStats(target, uid);
             console.log(`Stats for "${target}":`);
-            console.log(`  Total clicks: ${stats.totalClicks}`);
-            if (stats.daily.length > 0) {
+            console.log(`  Total visits:     ${stats.overview.total_visits}`);
+            console.log(`  Unique countries: ${stats.overview.unique_countries}`);
+            console.log(`  Unique referers:  ${stats.overview.unique_referers}`);
+            if (stats.time_series.length > 0) {
               console.log(`  Daily:`);
-              for (const d of stats.daily.slice(-7)) console.log(`    ${d.date}: ${d.count}`);
+              for (const d of stats.time_series.slice(-7)) console.log(`    ${d.date}: ${d.visits}`);
             }
-            if (stats.referrers.length > 0) {
-              console.log(`  Referrers:`);
-              for (const r of stats.referrers.slice(0, 5)) console.log(`    ${r.source}: ${r.count}`);
+            if (stats.top_referers.length > 0) {
+              console.log(`  Top referrers:`);
+              for (const r of stats.top_referers.slice(0, 5)) console.log(`    ${r.label}: ${r.count}`);
             }
-            if (stats.geo.length > 0) {
-              console.log(`  Countries:`);
-              for (const g of stats.geo.slice(0, 5)) console.log(`    ${g.country}: ${g.count}`);
+            if (stats.top_countries.length > 0) {
+              console.log(`  Top countries:`);
+              for (const c of stats.top_countries.slice(0, 5)) console.log(`    ${c.label}: ${c.count}`);
+            }
+            if (stats.devices.length > 0) {
+              console.log(`  Devices:`);
+              for (const d of stats.devices) console.log(`    ${d.label}: ${d.count}`);
             }
             break;
           }
@@ -181,12 +200,14 @@ async function main(): Promise<void> {
             break;
           }
           case "update": {
-            if (!target) { console.error("Usage: enke link update <slug> [--slug x] [--expires 7d] [--password x] [--webhook url]"); process.exit(1); }
+            if (!target) { console.error("Usage: enke link update <slug> [--url x] [--password x]"); process.exit(1); }
+            if (!opts.url && opts.password === undefined) {
+              console.error("At least one of --url or --password is required.");
+              process.exit(1);
+            }
             const updated = await updateLink(target, {
-              slug: opts.slug,
+              url: opts.url,
               password: opts.password,
-              expiresIn: opts.expires,
-              webhookUrl: opts.webhook,
             });
             console.log(`✓ Link updated:`);
             printLink(updated);
@@ -204,15 +225,16 @@ async function main(): Promise<void> {
       // ── landing ──
       case "landing": {
         const sub = args[1];
-        if (sub !== "create") { console.error("Usage: enke landing create <title> [--links url1,label1;url2,label2]"); process.exit(1); }
-        const title = args[2];
-        if (!title) { console.error("Usage: enke landing create <title>"); process.exit(1); }
+        if (sub !== "create") { console.error("Usage: enke landing create <slug> <title> [--links url1,title1;url2,title2]"); process.exit(1); }
+        const slug = args[2];
+        const title = args[3];
+        if (!slug || !title) { console.error("Usage: enke landing create <slug> <title>"); process.exit(1); }
         const linksRaw = opts.links ?? "";
         const links = linksRaw.split(";").filter(Boolean).map(pair => {
           const [url, label] = pair.split(",").map(s => s.trim());
-          return { url, label: label ?? url };
+          return { url, title: label ?? url };
         });
-        const lp = await createLanding({ title, links });
+        const lp = await createLanding({ slug, title, links });
         console.log(`✓ Landing page created:`);
         console.log(`  Title:  ${lp.title}`);
         console.log(`  Slug:   ${lp.slug}`);

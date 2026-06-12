@@ -40,12 +40,11 @@ beforeEach(() => {
 
 describe("shorten", () => {
   it("creates a short link with minimal options", async () => {
-    const link = {
-      id: "abc123", slug: "my-link", url: "https://example.com",
-      shortUrl: "https://en.ke/my-link", createdAt: "2026-01-01T00:00:00Z",
-      expiresAt: null, clicks: 0, passwordProtected: false,
+    const apiLink = {
+      uid: "1", id: "abc123", slug: "my-link", url: "https://example.com",
+      ctime: 1700000000, mtime: 1700000000, exp_days: 30,
     };
-    globalThis.fetch = mockFetch(201, { data: link });
+    globalThis.fetch = mockFetch(200, { success: true, link: apiLink });
 
     const result = await shorten("https://example.com");
     expect(result.slug).toBe("my-link");
@@ -53,16 +52,21 @@ describe("shorten", () => {
     expect(result.url).toBe("https://example.com");
   });
 
-  it("passes all options to the API", async () => {
-    globalThis.fetch = mockFetch(201, { data: { id: "x", slug: "custom", url: "https://x.com", shortUrl: "https://en.ke/custom", createdAt: "", expiresAt: null, clicks: 0, passwordProtected: true } });
-    await shorten("https://x.com", { slug: "custom", password: "pw", expiresIn: "7d", webhookUrl: "https://hook.com" });
+  it("passes options to the API", async () => {
+    const apiLink = {
+      uid: "1", id: "x", slug: "custom", url: "https://x.com",
+      ctime: 1700000000, mtime: 1700000000, exp_days: 7, password: "hash",
+    };
+    globalThis.fetch = mockFetch(200, { success: true, link: apiLink });
+    await shorten("https://x.com", { slug: "custom", password: "pw", keep_days: 7 });
 
     const callArgs = (globalThis.fetch as ReturnType<typeof mockFetch>).mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(callArgs[1].body as string);
     expect(body.slug).toBe("custom");
     expect(body.password).toBe("pw");
-    expect(body.expiresIn).toBe("7d");
-    expect(body.webhookUrl).toBe("https://hook.com");
+    expect(body.keep_days).toBe(7);
+    // webhookUrl should not be sent (removed from API)
+    expect(body.webhookUrl).toBeUndefined();
   });
 
   it("throws EnkeError on API failure", async () => {
@@ -72,7 +76,7 @@ describe("shorten", () => {
 
   it("throws when not authenticated", async () => {
     vi.mocked(getToken).mockResolvedValueOnce(null);
-    globalThis.fetch = mockFetch(200, { data: {} });
+    globalThis.fetch = mockFetch(200, { success: true, link: {} });
     await expect(shorten("https://x.com")).rejects.toThrow(EnkeError);
   });
 });
@@ -81,28 +85,29 @@ describe("shorten", () => {
 
 describe("listLinks", () => {
   it("lists links with defaults", async () => {
-    const links = [
-      { id: "1", slug: "a", url: "https://a.com", shortUrl: "https://en.ke/a", createdAt: "", expiresAt: null, clicks: 5, passwordProtected: false },
-      { id: "2", slug: "b", url: "https://b.com", shortUrl: "https://en.ke/b", createdAt: "", expiresAt: null, clicks: 3, passwordProtected: true },
+    const apiLinks = [
+      { uid: "1", id: "1", slug: "a", url: "https://a.com", ctime: 1700000000, mtime: 1700000000, exp_days: 30 },
+      { uid: "1", id: "2", slug: "b", url: "https://b.com", ctime: 1700000000, mtime: 1700000000, exp_days: 30, password: "hash" },
     ];
-    globalThis.fetch = mockFetch(200, { data: links });
-    const result = await listLinks();
-    expect(result).toHaveLength(2);
-    expect(result[0].slug).toBe("a");
+    globalThis.fetch = mockFetch(200, { list_complete: true, cursor: null, links: apiLinks });
+    const result = await listLinks({ uid: "1" });
+    expect(result.links).toHaveLength(2);
+    expect(result.links[0].slug).toBe("a");
+    expect(result.list_complete).toBe(true);
   });
 
-  it("passes limit and search params", async () => {
-    globalThis.fetch = mockFetch(200, { data: [] });
-    await listLinks({ limit: 5, search: "test" });
+  it("passes uid and cursor params", async () => {
+    globalThis.fetch = mockFetch(200, { list_complete: true, cursor: null, links: [] });
+    await listLinks({ uid: "3", cursor: "abc123" });
     const url = (globalThis.fetch as ReturnType<typeof mockFetch>).mock.calls[0][0] as string;
-    expect(url).toContain("limit=5");
-    expect(url).toContain("search=test");
+    expect(url).toContain("uid=3");
+    expect(url).toContain("cursor=abc123");
   });
 
-  it("returns empty array when no links", async () => {
-    globalThis.fetch = mockFetch(200, { data: [] });
-    const result = await listLinks();
-    expect(result).toEqual([]);
+  it("returns empty list when no links", async () => {
+    globalThis.fetch = mockFetch(200, { list_complete: true, cursor: null, links: [] });
+    const result = await listLinks({ uid: "1" });
+    expect(result.links).toEqual([]);
   });
 });
 
@@ -110,10 +115,11 @@ describe("listLinks", () => {
 
 describe("getLink", () => {
   it("fetches a single link by slug", async () => {
-    const link = { id: "1", slug: "abc", url: "https://x.com", shortUrl: "https://en.ke/abc", createdAt: "", expiresAt: null, clicks: 0, passwordProtected: false };
-    globalThis.fetch = mockFetch(200, { data: link });
+    const apiLink = { uid: "1", id: "1", slug: "abc", url: "https://x.com", ctime: 1700000000, mtime: 1700000000, exp_days: 30 };
+    globalThis.fetch = mockFetch(200, apiLink);
     const result = await getLink("abc");
     expect(result.slug).toBe("abc");
+    expect(result.shortUrl).toBe("https://en.ke/abc");
   });
 
   it("throws on 404", async () => {
@@ -139,18 +145,26 @@ describe("deleteLink", () => {
 // ── updateLink ──
 
 describe("updateLink", () => {
-  it("updates a link's slug", async () => {
-    const updated = { id: "1", slug: "new-slug", url: "https://x.com", shortUrl: "https://en.ke/new-slug", createdAt: "", expiresAt: null, clicks: 0, passwordProtected: false };
-    globalThis.fetch = mockFetch(200, { data: updated });
-    const result = await updateLink("old-slug", { slug: "new-slug" });
-    expect(result.slug).toBe("new-slug");
+  it("updates a link's URL", async () => {
+    const updated = { uid: "1", id: "1", slug: "abc", url: "https://new-url.com", ctime: 1700000000, mtime: 1700000100, exp_days: 30 };
+    globalThis.fetch = mockFetch(200, { success: true, result: { link: updated } });
+    const result = await updateLink("abc", { url: "https://new-url.com" });
+    expect(result.slug).toBe("abc");
+    expect(result.url).toBe("https://new-url.com");
   });
 
-  it("updates password and expiration", async () => {
-    globalThis.fetch = mockFetch(200, { data: { id: "1", slug: "x", url: "https://x.com", shortUrl: "https://en.ke/x", createdAt: "", expiresAt: "2026-06-19T00:00:00Z", clicks: 0, passwordProtected: true } });
-    const result = await updateLink("x", { password: "pw", expiresIn: "30d" });
+  it("updates password", async () => {
+    const updated = { uid: "1", id: "1", slug: "x", url: "https://x.com", ctime: 1700000000, mtime: 1700000100, exp_days: 30, password: "hash" };
+    globalThis.fetch = mockFetch(200, { success: true, result: { link: updated } });
+    const result = await updateLink("x", { password: "new-pw" });
     expect(result.passwordProtected).toBe(true);
-    expect(result.expiresAt).toBeTruthy();
+  });
+
+  it("uses PUT method", async () => {
+    globalThis.fetch = mockFetch(200, { success: true, result: { link: { uid: "1", id: "1", slug: "x", url: "https://x.com", ctime: 1, mtime: 1, exp_days: 30 } } });
+    await updateLink("x", { url: "https://y.com" });
+    const callArgs = (globalThis.fetch as ReturnType<typeof mockFetch>).mock.calls[0] as [string, RequestInit];
+    expect(callArgs[1].method).toBe("PUT");
   });
 });
 
@@ -159,25 +173,33 @@ describe("updateLink", () => {
 describe("getLinkStats", () => {
   it("returns click analytics", async () => {
     const stats = {
-      totalClicks: 42,
-      daily: [{ date: "2026-06-12", count: 10 }],
-      referrers: [{ source: "twitter.com", count: 5 }],
-      geo: [{ country: "US", count: 20 }],
-      devices: [{ type: "mobile", count: 15 }],
+      overview: { total_visits: 42, unique_countries: 5, unique_referers: 3 },
+      time_series: [{ date: "2026-06-12", visits: 10 }],
+      top_countries: [{ label: "US", count: 20, percentage: 47.6 }],
+      top_referers: [{ label: "twitter.com", count: 5, percentage: 11.9 }],
+      devices: [{ label: "Mobile", count: 15, percentage: 35.7 }],
     };
-    globalThis.fetch = mockFetch(200, { data: stats });
-    const result = await getLinkStats("abc");
-    expect(result.totalClicks).toBe(42);
-    expect(result.daily).toHaveLength(1);
-    expect(result.referrers).toHaveLength(1);
-    expect(result.geo).toHaveLength(1);
+    globalThis.fetch = mockFetch(200, stats);
+    const result = await getLinkStats("abc", "1");
+    expect(result.overview.total_visits).toBe(42);
+    expect(result.time_series).toHaveLength(1);
+    expect(result.top_referers).toHaveLength(1);
+    expect(result.top_countries).toHaveLength(1);
     expect(result.devices).toHaveLength(1);
   });
 
+  it("uses correct link_stat endpoint", async () => {
+    globalThis.fetch = mockFetch(200, { overview: { total_visits: 0, unique_countries: 0, unique_referers: 0 }, time_series: [], top_countries: [], top_referers: [], devices: [] });
+    await getLinkStats("abc", "1");
+    const url = (globalThis.fetch as ReturnType<typeof mockFetch>).mock.calls[0][0] as string;
+    expect(url).toContain("/api/v1/link_stat/abc");
+    expect(url).toContain("uid=1");
+  });
+
   it("handles zero-click stats", async () => {
-    globalThis.fetch = mockFetch(200, { data: { totalClicks: 0, daily: [], referrers: [], geo: [], devices: [] } });
+    globalThis.fetch = mockFetch(200, { overview: { total_visits: 0, unique_countries: 0, unique_referers: 0 }, time_series: [], top_countries: [], top_referers: [], devices: [] });
     const result = await getLinkStats("new");
-    expect(result.totalClicks).toBe(0);
+    expect(result.overview.total_visits).toBe(0);
   });
 });
 
@@ -185,24 +207,25 @@ describe("getLinkStats", () => {
 
 describe("createLanding", () => {
   it("creates a landing page with links", async () => {
-    const lp = {
-      id: "lp1", slug: "my-links", title: "My Links",
-      links: [{ url: "https://github.com", label: "GitHub" }],
-      theme: "light", createdAt: "2026-06-12T00:00:00Z",
+    const page = {
+      uid: "1", slug: "my-links", title: "My Links",
+      links: [{ title: "GitHub", url: "https://github.com", sort_order: 0 }],
+      ctime: 1700000000, mtime: 1700000000,
     };
-    globalThis.fetch = mockFetch(201, { data: lp });
+    globalThis.fetch = mockFetch(200, { success: true, result: { page } });
     const result = await createLanding({
+      slug: "my-links",
       title: "My Links",
-      links: [{ url: "https://github.com", label: "GitHub" }],
-      theme: "light",
+      links: [{ url: "https://github.com", title: "GitHub" }],
     });
     expect(result.slug).toBe("my-links");
     expect(result.links).toHaveLength(1);
+    expect(result.links[0].title).toBe("GitHub");
   });
 
-  it("creates landing without theme (defaults)", async () => {
-    globalThis.fetch = mockFetch(201, { data: { id: "lp2", slug: "simple", title: "Simple", links: [], theme: "minimal", createdAt: "" } });
-    const result = await createLanding({ title: "Simple", links: [] });
+  it("slug is now required", async () => {
+    globalThis.fetch = mockFetch(200, { success: true, result: { page: { uid: "1", slug: "simple", title: "Simple", links: [], ctime: 1, mtime: 1 } } });
+    const result = await createLanding({ slug: "simple", title: "Simple", links: [] });
     expect(result.title).toBe("Simple");
   });
 });
