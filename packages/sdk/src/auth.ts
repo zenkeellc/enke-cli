@@ -81,11 +81,15 @@ export async function login(): Promise<AuthConfig> {
         // Validate OAuth state to prevent CSRF
         const returnedState = reqUrl.searchParams.get("state");
         if (returnedState !== state) {
-          res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
-          res.end("Login failed: state mismatch. Please try again.");
+          res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(`<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding-top:80px">
+            <h1 style="color:#e53935">Login Failed — State Mismatch</h1>
+            <p>CSRF state validation failed. This can happen if you navigated away from the login page during the OAuth flow.</p>
+            <p>Please close this tab and run <code>enke login</code> again in your terminal.</p>
+          </body></html>`);
           server.close();
           settled = true;
-          reject(new Error("OAuth state mismatch"));
+          reject(new Error("OAuth state mismatch — try running 'enke login' again"));
           return;
         }
 
@@ -144,10 +148,16 @@ export async function login(): Promise<AuthConfig> {
         return;
       }
       const port = addr.port;
-      const redirectUri = encodeURIComponent(`http://127.0.0.1:${port}/callback`);
+      const callbackUrl = `http://127.0.0.1:${port}/callback`;
+      const redirectUri = encodeURIComponent(callbackUrl);
       const loginUrl = `${WEB_URL}/login?redirect=${redirectUri}&state=${encodeURIComponent(state)}&source=cli`;
+
+      console.error(`Callback URL: ${callbackUrl}`);
+      console.error(`If the browser does not open automatically, visit:\n  ${loginUrl}\n`);
+
       open(loginUrl).catch(() => {
-        console.error(`Please open this URL in your browser:\n\n  ${loginUrl}\n`);
+        console.error(`Could not open browser automatically.`);
+        console.error(`Please open this URL manually:\n\n  ${loginUrl}\n`);
       });
     });
 
