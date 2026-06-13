@@ -252,3 +252,130 @@ describe("whoami", () => {
     await expect(whoami()).rejects.toThrow(EnkeError);
   });
 });
+
+
+// ── Structured API error parsing ──
+
+describe("structured error handling", () => {
+  it("parses structured error JSON with code, message, params", async () => {
+    const errorBody = JSON.stringify({
+      error: "LINK_LIMIT_REACHED",
+      message: "Link limit (100) reached. Your plan: hobby. Upgrade for more links.",
+      params: { limit: 100, current: 100, plan: "hobby" },
+    });
+    globalThis.fetch = mockFetch(429, errorBody);
+
+    try {
+      await shorten("https://example.com");
+      expect.fail("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(EnkeError);
+      const e = err as EnkeError;
+      expect(e.statusCode).toBe(429);
+      expect(e.errorCode).toBe("LINK_LIMIT_REACHED");
+      expect(e.message).toBe("Link limit (100) reached. Your plan: hobby. Upgrade for more links.");
+      expect(e.params).toEqual({ limit: 100, current: 100, plan: "hobby" });
+    }
+  });
+
+  it("parses structured error without params", async () => {
+    const errorBody = JSON.stringify({
+      error: "AUTH_REQUIRED",
+      message: "Unauthorized",
+    });
+    globalThis.fetch = mockFetch(401, errorBody);
+
+    try {
+      await whoami();
+      expect.fail("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(EnkeError);
+      const e = err as EnkeError;
+      expect(e.statusCode).toBe(401);
+      expect(e.errorCode).toBe("AUTH_REQUIRED");
+      expect(e.message).toBe("Unauthorized");
+      expect(e.params).toBeUndefined();
+    }
+  });
+
+  it("falls back to raw text for non-JSON error body", async () => {
+    globalThis.fetch = mockFetch(500, "Internal Server Error");
+
+    try {
+      await shorten("https://example.com");
+      expect.fail("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(EnkeError);
+      const e = err as EnkeError;
+      expect(e.statusCode).toBe(500);
+      expect(e.message).toBe("Internal Server Error");
+      expect(e.errorCode).toBeUndefined();
+    }
+  });
+
+  it("handles JSON without error/message fields as raw text", async () => {
+    const errorBody = JSON.stringify({ detail: "Something went wrong" });
+    globalThis.fetch = mockFetch(400, errorBody);
+
+    try {
+      await shorten("https://example.com");
+      expect.fail("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(EnkeError);
+      const e = err as EnkeError;
+      expect(e.statusCode).toBe(400);
+      expect(e.message).toBe(errorBody);
+      expect(e.errorCode).toBeUndefined();
+    }
+  });
+
+  it("handles empty error body", async () => {
+    globalThis.fetch = mockFetch(500, "");
+    try {
+      await shorten("https://example.com");
+      expect.fail("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(EnkeError);
+      const e = err as EnkeError;
+      expect(e.statusCode).toBe(500);
+      expect(e.message).toBe("Unknown error");
+    }
+  });
+
+  it("parses quota exceeded error with params for i18n", async () => {
+    const errorBody = JSON.stringify({
+      error: "CUSTOM_SLUG_QUOTA_EXCEEDED",
+      message: "Monthly custom slug limit (10) reached. Your plan: hobby. Upgrade for more.",
+      params: { limit: 10, current: 10, plan: "hobby" },
+    });
+    globalThis.fetch = mockFetch(429, errorBody);
+
+    try {
+      await shorten("https://example.com", { slug: "my-slug" });
+      expect.fail("should have thrown");
+    } catch (err) {
+      const e = err as EnkeError;
+      expect(e.errorCode).toBe("CUSTOM_SLUG_QUOTA_EXCEEDED");
+      expect(e.params).toEqual({ limit: 10, current: 10, plan: "hobby" });
+    }
+  });
+
+  it("parses feature-gated error (402)", async () => {
+    const errorBody = JSON.stringify({
+      error: "FEATURE_REQUIRES_PAID_PLAN",
+      message: "Password protection requires Pro plan or higher. Upgrade to unlock.",
+      params: { feature: "password", requiredPlan: "pro" },
+    });
+    globalThis.fetch = mockFetch(402, errorBody);
+
+    try {
+      await shorten("https://example.com", { password: "secret" });
+      expect.fail("should have thrown");
+    } catch (err) {
+      const e = err as EnkeError;
+      expect(e.statusCode).toBe(402);
+      expect(e.errorCode).toBe("FEATURE_REQUIRES_PAID_PLAN");
+      expect(e.params?.requiredPlan).toBe("pro");
+    }
+  });
+});
