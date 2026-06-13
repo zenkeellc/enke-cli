@@ -63,7 +63,7 @@ export interface LinkPreview {
 export interface ShortenOptions {
   /** Custom slug (back-half). Auto-generated if omitted. */
   slug?: string;
-  /** Duration in days to keep the link (1–365). Defaults to 30. */
+  /** Duration in days to keep the link (plan-dependent, up to 3650). Defaults to 30. */
   keep_days?: number;
   /** Optional password to protect the link (min 4 chars). */
   password?: string;
@@ -158,6 +158,16 @@ export interface LandingOptions {
   avatar_url?: string;
 }
 
+/** Plan limits from /api/v1/me */
+export interface PlanLimits {
+  slugMinLength: number;
+  bulkBatchSize: number | null;
+  docFileSizeMB: number;
+  docMaxExpDays: number;
+  linkMaxExpirationDays: number;
+  linkMaxKeepDays: number;
+}
+
 /** User profile info — matches API's /api/v1/me response. */
 export interface UserInfo {
   user_id: number;
@@ -171,7 +181,9 @@ export interface UserInfo {
     links: { used: number; limit: number | null };
     aiSlugs: { used: number; limit: number | null };
     landingPages: { used: number; limit: number | null };
+    docShares?: { used: number; limit: number | null };
   };
+  planLimits: PlanLimits;
 }
 
 /** Auth token stored locally. */

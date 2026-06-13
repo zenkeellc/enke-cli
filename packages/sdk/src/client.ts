@@ -9,10 +9,30 @@ class EnkeError extends Error {
   constructor(
     message: string,
     public statusCode: number,
+    public errorCode?: string,
+    public params?: Record<string, number | string | undefined>,
   ) {
     super(message);
     this.name = "EnkeError";
   }
+}
+
+/**
+ * Parse a structured API error response.
+ * Backend returns: { error: "CODE", message: "...", params?: {...} }
+ * Falls back to raw text if parsing fails.
+ */
+function parseApiError(bodyText: string, statusCode: number): EnkeError {
+  try {
+    const json = JSON.parse(bodyText) as { error?: string; message?: string; params?: Record<string, number | string | undefined> };
+    if (json.error && json.message) {
+      return new EnkeError(json.message, statusCode, json.error, json.params);
+    }
+    // If JSON but no error/message fields, fall through to raw text
+  } catch {
+    // Not valid JSON, use raw text
+  }
+  return new EnkeError(bodyText || "Unknown error", statusCode);
 }
 
 async function request<T>(
@@ -34,8 +54,8 @@ async function request<T>(
   });
 
   if (!res.ok) {
-    const msg = await res.text().catch(() => "Unknown error");
-    throw new EnkeError(msg, res.status);
+    const bodyText = await res.text().catch(() => "");
+    throw parseApiError(bodyText, res.status);
   }
 
   return res.json() as T;
@@ -213,8 +233,8 @@ export async function uploadDoc(
   });
 
   if (!res.ok) {
-    const msg = await res.text().catch(() => "Unknown error");
-    throw new EnkeError(msg, res.status);
+    const bodyText = await res.text().catch(() => "");
+    throw parseApiError(bodyText, res.status);
   }
 
   const data = await res.json() as { success: boolean; result: { doc: DocShare } };
