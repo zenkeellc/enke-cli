@@ -7,6 +7,8 @@ import {
   createLanding, whoami, EnkeError,
 } from "enke-sdk";
 
+const DEFAULT_PAGE_SIZE = 20;
+
 function help(): void {
   console.log(`en.ke — secure link & context relay for AI agents
 
@@ -275,7 +277,7 @@ async function main(): Promise<void> {
             break;
           }
           case "list": {
-            const result = await listDocs(opts.cursor, opts.limit ? parseInt(opts.limit) : 20);
+            const result = await listDocs(opts.cursor, opts.limit ? parseInt(opts.limit) : DEFAULT_PAGE_SIZE);
             if (result.docs.length === 0) { console.log("No documents yet."); break; }
             console.log(`Documents (${result.docs.length}):\n`);
             for (const d of result.docs) {
@@ -345,6 +347,8 @@ async function main(): Promise<void> {
     if (err instanceof EnkeError) {
       console.error(`Error: ${err.message}`);
       if (err.statusCode === 401) console.error("Run 'enke login' to authenticate.");
+      else if (err.statusCode === 402) console.error("This feature requires a paid plan. Visit https://www.en.ke/pricing to upgrade.");
+      else if (err.statusCode === 429) console.error("Quota exceeded. Upgrade your plan at https://www.en.ke/pricing for higher limits.");
     } else {
       console.error("Error:", err instanceof Error ? err.message : String(err));
     }
