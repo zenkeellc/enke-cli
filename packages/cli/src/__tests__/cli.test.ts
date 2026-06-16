@@ -175,4 +175,28 @@ describe("command routing", () => {
     const pos = getPositionalArgs(["node", "enke", "logout"]);
     expect(pos[0]).toBe("logout");
   });
+
+  it("version", () => {
+    const pos = getPositionalArgs(["node", "enke", "version"]);
+    expect(pos[0]).toBe("version");
+  });
+
+  it("version --json", () => {
+    const pos = getPositionalArgs(["node", "enke", "version", "--json"]);
+    const opts = parseArgs(["node", "enke", "version", "--json"]);
+    expect(pos[0]).toBe("version");
+    expect(opts.json).toBe("true");
+  });
+
+  it("update", () => {
+    const pos = getPositionalArgs(["node", "enke", "update"]);
+    expect(pos[0]).toBe("update");
+  });
+
+  it("update --json", () => {
+    const pos = getPositionalArgs(["node", "enke", "update", "--json"]);
+    const opts = parseArgs(["node", "enke", "update", "--json"]);
+    expect(pos[0]).toBe("update");
+    expect(opts.json).toBe("true");
+  });
 });

@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 
 import { realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import {
   login, logout, loadConfig,
   shorten, listLinks, deleteLink, updateLink, getLinkStats,
   createLanding, whoami, EnkeError,
 } from "enke-sdk";
+
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json") as { name: string; version: string };
+const VERSION: string = pkg.version;
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -16,6 +21,8 @@ Usage:
   enke login                          Log in via browser (OAuth)
   enke logout                         Remove stored credentials
   enke whoami                         Show logged-in user info
+  enke version [--json]               Show CLI version
+  enke update [--json]                Check for updates & show install instructions
 
   enke link create <url>              Shorten a URL
   enke link list [--cursor <cursor>]  List your short links
@@ -112,6 +119,19 @@ async function getUid(): Promise<string> {
   return _cachedUid;
 }
 
+async function checkLatestVersion(): Promise<string | null> {
+  try {
+    const res = await fetch("https://registry.npmjs.org/enke-cli/latest", {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { version?: string };
+    return data.version ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function main(): Promise<void> {
   const args = getPositionalArgs();
   const opts = parseArgs();
@@ -141,6 +161,35 @@ async function main(): Promise<void> {
         console.log(`  Name:   ${user.username}`);
         console.log(`  Plan:   ${user.planName} (${user.plan})`);
         console.log(`  Role:   ${user.role}`);
+        break;
+      }
+
+      case "version": {
+        if (opts.json === "true") {
+          console.log(JSON.stringify({ name: pkg.name, version: VERSION }));
+        } else {
+          console.log(`enke-cli ${VERSION}`);
+        }
+        break;
+      }
+
+      case "update": {
+        const latest = await checkLatestVersion();
+        const upToDate = !latest || latest === VERSION;
+
+        if (opts.json === "true") {
+          console.log(JSON.stringify({
+            name: pkg.name,
+            current: VERSION,
+            latest: latest ?? "unknown",
+            upToDate,
+          }));
+        } else if (upToDate) {
+          console.log(`✓ enke-cli is up to date (${VERSION}).`);
+        } else {
+          console.log(`enke-cli ${VERSION} → ${latest} available.`);
+          console.log(`Run: npm install -g enke-cli`);
+        }
         break;
       }
 
@@ -372,7 +421,7 @@ const isMainModule = (() => {
 if (isMainModule) {
   // Quick check for login state on any command except login/logout/help
   const cmd = process.argv[2];
-  if (cmd && !["login", "logout", "help", "--help", "-h"].includes(cmd)) {
+  if (cmd && !["login", "logout", "help", "--help", "-h", "version", "update"].includes(cmd)) {
     const cfg = loadConfig();
     if (!cfg) {
       console.error("Not logged in. Run 'enke login' first.");
