@@ -199,4 +199,74 @@ describe("command routing", () => {
     expect(pos[0]).toBe("update");
     expect(opts.json).toBe("true");
   });
+
+  it("link get", () => {
+    const pos = getPositionalArgs(["node", "enke", "link", "get", "my-slug"]);
+    expect(pos).toEqual(["link", "get", "my-slug"]);
+  });
+
+  it("link get --json", () => {
+    const pos = getPositionalArgs(["node", "enke", "link", "get", "my-slug", "--json"]);
+    const opts = parseArgs(["node", "enke", "link", "get", "my-slug", "--json"]);
+    expect(pos[2]).toBe("my-slug");
+    expect(opts.json).toBe("true");
+  });
+
+  it("link list --all --json", () => {
+    const pos = getPositionalArgs(["node", "enke", "link", "list", "--all", "--json"]);
+    const opts = parseArgs(["node", "enke", "link", "list", "--all", "--json"]);
+    expect(pos).toEqual(["link", "list"]);
+    expect(opts.all).toBe("true");
+    expect(opts.json).toBe("true");
+  });
+
+  it("link stats --json", () => {
+    const pos = getPositionalArgs(["node", "enke", "link", "stats", "my-slug", "--json"]);
+    const opts = parseArgs(["node", "enke", "link", "stats", "my-slug", "--json"]);
+    expect(pos[2]).toBe("my-slug");
+    expect(opts.json).toBe("true");
+  });
+
+  it("doc list --all --json", () => {
+    const pos = getPositionalArgs(["node", "enke", "doc", "list", "--all", "--json"]);
+    const opts = parseArgs(["node", "enke", "doc", "list", "--all", "--json"]);
+    expect(pos).toEqual(["doc", "list"]);
+    expect(opts.all).toBe("true");
+    expect(opts.json).toBe("true");
+  });
+
+  it("token info", () => {
+    const pos = getPositionalArgs(["node", "enke", "token", "info"]);
+    expect(pos).toEqual(["token", "info"]);
+  });
+
+  it("token info --json", () => {
+    const opts = parseArgs(["node", "enke", "token", "info", "--json"]);
+    expect(opts.json).toBe("true");
+  });
+
+  it("config show", () => {
+    const pos = getPositionalArgs(["node", "enke", "config", "show"]);
+    expect(pos).toEqual(["config", "show"]);
+  });
+
+  it("config clear", () => {
+    const pos = getPositionalArgs(["node", "enke", "config", "clear"]);
+    expect(pos).toEqual(["config", "clear"]);
+  });
+
+  it("completion bash", () => {
+    const pos = getPositionalArgs(["node", "enke", "completion", "bash"]);
+    expect(pos).toEqual(["completion", "bash"]);
+  });
+
+  it("completion zsh", () => {
+    const pos = getPositionalArgs(["node", "enke", "completion", "zsh"]);
+    expect(pos).toEqual(["completion", "zsh"]);
+  });
+
+  it("global --verbose flag", () => {
+    const opts = parseArgs(["node", "enke", "link", "list", "--verbose"]);
+    expect(opts.verbose).toBe("true");
+  });
 });

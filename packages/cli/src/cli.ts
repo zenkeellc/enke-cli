@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
-import { realpathSync } from "node:fs";
+import { realpathSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { createRequire } from "node:module";
 import {
-  login, logout, loadConfig,
-  shorten, listLinks, deleteLink, updateLink, getLinkStats,
+  login, logout, loadConfig, getToken, clearConfig,
+  shorten, listLinks, getLink, deleteLink, updateLink, getLinkStats,
   createLanding, whoami, EnkeError,
 } from "enke-sdk";
 
@@ -14,6 +16,47 @@ const VERSION: string = pkg.version;
 
 const DEFAULT_PAGE_SIZE = 20;
 
+// ── Global flags ──
+
+let VERBOSE = false;
+
+function debug(...args: unknown[]): void {
+  if (VERBOSE) console.error("[DEBUG]", ...args);
+}
+
+/** Print a structured error, surfacing errorCode and params for scripting. */
+function printError(err: unknown, asJson: boolean): void {
+  if (err instanceof EnkeError) {
+    if (asJson) {
+      console.log(JSON.stringify({
+        error: true,
+        message: err.message,
+        code: err.errorCode ?? "UNKNOWN",
+        status: err.statusCode,
+        params: err.params ?? {},
+      }, null, 2));
+    } else {
+      const code = err.errorCode ? ` [${err.errorCode}]` : "";
+      console.error(`Error (${err.statusCode})${code}: ${err.message}`);
+    }
+  } else {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (asJson) {
+      console.log(JSON.stringify({ error: true, message: msg }));
+    } else {
+      console.error("Error:", msg);
+      if (VERBOSE && err instanceof Error && err.stack) {
+        console.error(err.stack);
+      }
+    }
+  }
+}
+
+/** Check if global --json flag is set. */
+function isJson(opts: Record<string, string>): boolean {
+  return opts.json === "true";
+}
+
 function help(): void {
   console.log(`en.ke — secure link & context relay for AI agents
 
@@ -22,10 +65,15 @@ Usage:
   enke logout                         Remove stored credentials
   enke whoami                         Show logged-in user info
   enke version [--json]               Show CLI version
-  enke update [--json]                Check for updates & show install instructions
+  enke update [--json]                Check for updates
+
+  enke token info                     Show token expiry & API endpoint
+  enke config show                    Show current configuration
+  enke config clear                   Remove stored credentials
 
   enke link create <url>              Shorten a URL
-  enke link list [--cursor <cursor>]  List your short links
+  enke link get <slug>                Show full link details
+  enke link list [--cursor c] [--all] List your short links
   enke link stats <slug>              Click analytics for a link
   enke link delete <slug>             Revoke a short link
   enke link update <slug> [opts]      Update a link's properties
@@ -34,11 +82,16 @@ Usage:
           [--links url1,title1;url2,title2]
 
   enke doc upload <file>              Share a document
-  enke doc list                       List shared documents
+  enke doc list [--cursor c] [--all] List shared documents
+  enke doc get <slug>                 Show document details
   enke doc delete <slug>              Delete a shared document
   enke doc update <slug> [opts]       Update document settings
   enke doc renew <slug>               Reset document expiration
   enke doc expire <slug> <days>       Set document expiration days
+
+Global flags:
+  --json          Machine-readable JSON output
+  --verbose       Show debug output (API URL, request details)
 
 Options (link create):
   --slug <slug>       Custom back-half
@@ -57,11 +110,17 @@ Options (doc upload/update):
   --no-download       Preview only, no download button
   --max-downloads <n> Max download count
 
+Shell completion:
+  enke completion bash    Output bash completion script
+  enke completion zsh     Output zsh completion script
+  source <(enke completion bash)   Enable completions in current shell
+
 Examples:
   enke login
   enke link create https://example.com --slug my-link --keep-days 7
+  enke link list --all --json
   enke doc upload ./report.pdf --exp-days 7 --password secret123
-  enke doc list
+  enke token info --json
 `);
 }
 
@@ -100,13 +159,59 @@ export function getPositionalArgs(argv?: string[]): string[] {
   return result;
 }
 
-function printLink(link: { slug: string; shortUrl: string; url: string; createdAt: string; expiresAt: string | null }): void {
+function printLink(link: { slug: string; shortUrl: string; url: string; createdAt: string; expiresAt: string | null; passwordProtected?: boolean }): void {
   console.log(`  Slug:       ${link.slug}`);
   console.log(`  Short URL:  ${link.shortUrl}`);
   console.log(`  Target:     ${link.url}`);
   console.log(`  Created:    ${link.createdAt}`);
   if (link.expiresAt) console.log(`  Expires:    ${link.expiresAt}`);
+  if (link.passwordProtected !== undefined && link.passwordProtected) console.log(`  Protected:  password required`);
   console.log();
+}
+
+function printLinkDetail(link: Record<string, unknown>): void {
+  console.log(`  Slug:       ${link.slug}`);
+  console.log(`  Short URL:  ${link.shortUrl ?? `https://en.ke/${link.slug}`}`);
+  console.log(`  Target:     ${link.url}`);
+  console.log(`  Created:    ${link.createdAt}`);
+  if (link.expiresAt) console.log(`  Expires:    ${link.expiresAt}`);
+  if (link.password) console.log(`  Protected:  password required`);
+  if (link.comment) console.log(`  Comment:    ${link.comment}`);
+  if (link.title) console.log(`  Title:      ${link.title}`);
+  if (link.description) console.log(`  Desc:       ${link.description}`);
+  if (link.image) console.log(`  Image:      ${link.image}`);
+  const rules = link.rules as Array<Record<string,unknown>> | undefined;
+  if (rules && rules.length > 0) {
+    console.log(`  Rules (${rules.length}):`);
+    for (const r of rules) console.log(`    ${r.type}:${r.value} → ${r.url}`);
+  }
+  const ab = link.ab_targets as Array<Record<string,unknown>> | undefined;
+  if (ab && ab.length > 0) {
+    console.log(`  A/B Targets (${ab.length}):`);
+    for (const t of ab) console.log(`    weight=${t.weight} → ${t.url}`);
+  }
+  const preview = link.preview as Record<string,unknown> | undefined;
+  if (preview && preview.enabled) {
+    console.log(`  Preview:    on (${preview.delay_seconds ?? 0}s delay)`);
+    if (preview.title) console.log(`    Title:    ${preview.title}`);
+    if (preview.message) console.log(`    Message:  ${preview.message}`);
+  }
+  console.log();
+}
+
+/** Auto-paginate: fetch all pages, accumulating results. */
+async function fetchAllPages<T>(
+  fetcher: (cursor: string) => Promise<{ list_complete: boolean; cursor: string | null; items: T[] }>,
+): Promise<T[]> {
+  const all: T[] = [];
+  let cursor = "";
+  while (true) {
+    const page = await fetcher(cursor);
+    all.push(...page.items);
+    if (page.list_complete || !page.cursor) break;
+    cursor = page.cursor;
+  }
+  return all;
 }
 
 /** Cached user ID for the session — avoids redundant whoami calls. */
@@ -117,6 +222,77 @@ async function getUid(): Promise<string> {
   const user = await whoami();
   _cachedUid = String(user.user_id);
   return _cachedUid;
+}
+
+/** Generate shell completion script for bash or zsh. */
+function generateCompletion(shell: "bash" | "zsh"): string {
+  const TOP_CMDS = ["login", "logout", "whoami", "version", "update", "token", "config", "completion"];
+  const LINK_SUBS = ["create", "get", "list", "stats", "delete", "update"];
+  const DOC_SUBS = ["upload", "list", "get", "delete", "update", "renew", "expire"];
+  const ALL = [...TOP_CMDS, ...LINK_SUBS.map(s => `link_${s}`), ...DOC_SUBS.map(s => `doc_${s}`), "landing_create", "help"];
+
+  if (shell === "bash") {
+    return `# enke bash completion — source this file or add to ~/.bash_completion
+_enke_completion() {
+  local cur prev words cword
+  _init_completion || return
+  COMPREPLY=()
+
+  case $cword in
+    1)
+      COMPREPLY=($(compgen -W "${TOP_CMDS.join(" ")} help" -- "$cur"))
+      ;;
+    2)
+      case $prev in
+        link)   COMPREPLY=($(compgen -W "${LINK_SUBS.join(" ")}" -- "$cur")) ;;
+        doc)    COMPREPLY=($(compgen -W "${DOC_SUBS.join(" ")}" -- "$cur")) ;;
+        token)  COMPREPLY=($(compgen -W "info" -- "$cur")) ;;
+        config) COMPREPLY=($(compgen -W "show clear" -- "$cur")) ;;
+        landing) COMPREPLY=($(compgen -W "create" -- "$cur")) ;;
+        completion) COMPREPLY=($(compgen -W "bash zsh" -- "$cur")) ;;
+      esac
+      ;;
+  esac
+}
+complete -F _enke_completion enke`;
+  }
+
+  // zsh
+  return `#compdef enke
+# enke zsh completion — place in a directory in $fpath
+
+_enke() {
+  local -a top_cmds link_subs doc_subs
+  top_cmds=(${TOP_CMDS.join(" ")} help)
+  link_subs=(${LINK_SUBS.join(" ")})
+  doc_subs=(${DOC_SUBS.join(" ")})
+
+  _arguments -C \\
+    "1:command:(${TOP_CMDS.join(" ")} help)" \\
+    "*::arg:->args"
+
+  case $words[1] in
+    link)
+      _arguments "2:subcommand:(${LINK_SUBS.join(" ")})"
+      ;;
+    doc)
+      _arguments "2:subcommand:(${DOC_SUBS.join(" ")})"
+      ;;
+    token)
+      _arguments "2:subcommand:(info)"
+      ;;
+    config)
+      _arguments "2:subcommand:(show clear)"
+      ;;
+    landing)
+      _arguments "2:subcommand:(create)"
+      ;;
+    completion)
+      _arguments "2:shell:(bash zsh)"
+      ;;
+  esac
+}
+_enke "$@"`;
 }
 
 async function checkLatestVersion(): Promise<string | null> {
@@ -136,6 +312,15 @@ async function main(): Promise<void> {
   const args = getPositionalArgs();
   const opts = parseArgs();
   const cmd = args[0];
+
+  // Global flags
+  VERBOSE = opts.verbose === "true";
+  const json = isJson(opts);
+
+  if (VERBOSE) {
+    const { API_URL } = await import("enke-sdk");
+    debug("API_URL =", API_URL);
+  }
 
   if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") {
     help();
@@ -157,10 +342,85 @@ async function main(): Promise<void> {
       }
       case "whoami": {
         const user = await whoami();
-        console.log(`  Email:  ${user.email}`);
-        console.log(`  Name:   ${user.username}`);
-        console.log(`  Plan:   ${user.planName} (${user.plan})`);
-        console.log(`  Role:   ${user.role}`);
+        if (json) {
+          console.log(JSON.stringify(user, null, 2));
+        } else {
+          console.log(`  Email:  ${user.email}`);
+          console.log(`  Name:   ${user.username}`);
+          console.log(`  Plan:   ${user.planName} (${user.plan})`);
+          console.log(`  Role:   ${user.role}`);
+        }
+        break;
+      }
+
+      case "token": {
+        const sub = args[1];
+        if (sub !== "info") { console.error("Usage: enke token info [--json]"); process.exit(1); }
+        const cfg = loadConfig();
+        if (!cfg) { console.error("Not logged in."); process.exit(1); }
+        const token = await getToken();
+        const now = Math.floor(Date.now() / 1000);
+        const remaining = cfg.expiresAt - now;
+        const info = {
+          apiUrl: cfg.apiUrl,
+          userApiUrl: cfg.userApiUrl,
+          expiresAt: new Date(cfg.expiresAt * 1000).toISOString(),
+          expiresIn: `${remaining}s (${Math.round(remaining / 60)}m)`,
+          hasRefreshToken: !!cfg.refreshToken,
+          tokenValid: !!token,
+        };
+        if (json) {
+          console.log(JSON.stringify(info, null, 2));
+        } else {
+          console.log(`  API URL:       ${info.apiUrl}`);
+          console.log(`  User API:      ${info.userApiUrl}`);
+          console.log(`  Expires:       ${info.expiresAt}`);
+          console.log(`  Remaining:     ${info.expiresIn}`);
+          console.log(`  Refresh token: ${info.hasRefreshToken ? "yes" : "no"}`);
+        }
+        break;
+      }
+
+      case "config": {
+        const sub = args[1];
+        if (!sub || sub === "show") {
+          const cfg = loadConfig();
+          if (!cfg) { console.error("Not logged in. No config found."); process.exit(1); }
+          if (json) {
+            // Redact tokens for security
+            console.log(JSON.stringify({
+              apiUrl: cfg.apiUrl,
+              userApiUrl: cfg.userApiUrl,
+              expiresAt: new Date(cfg.expiresAt * 1000).toISOString(),
+              tokenPrefix: cfg.token.substring(0, 20) + "...",
+              hasRefreshToken: !!cfg.refreshToken,
+              configFile: "[XDG_CONFIG_HOME]/enke/config.json",
+            }, null, 2));
+          } else {
+            console.log(`  API URL:       ${cfg.apiUrl}`);
+            console.log(`  User API:      ${cfg.userApiUrl}`);
+            console.log(`  Expires:       ${new Date(cfg.expiresAt * 1000).toISOString()}`);
+            console.log(`  Token:         ${cfg.token.substring(0, 20)}...`);
+            console.log(`  Refresh token: ${cfg.refreshToken ? cfg.refreshToken.substring(0, 20) + "..." : "none"}`);
+          }
+          break;
+        }
+        if (sub === "clear") {
+          clearConfig();
+          console.log("✓ Config cleared.");
+          break;
+        }
+        console.error("Usage: enke config <show|clear>");
+        process.exit(1);
+      }
+
+      case "completion": {
+        const shell = args[1] as "bash" | "zsh" | undefined;
+        if (!shell || !["bash", "zsh"].includes(shell)) {
+          console.error("Usage: enke completion <bash|zsh>");
+          process.exit(1);
+        }
+        console.log(generateCompletion(shell));
         break;
       }
 
@@ -197,7 +457,7 @@ async function main(): Promise<void> {
       case "link": {
         const sub = args[1];
         const target = args[2];
-        if (!sub) { console.error("Usage: enke link <create|list|stats|delete|update> [...]"); process.exit(1); }
+        if (!sub) { console.error("Usage: enke link <create|get|list|stats|delete|update> [...]"); process.exit(1); }
 
         switch (sub) {
           case "create": {
@@ -207,41 +467,71 @@ async function main(): Promise<void> {
               password: opts.password,
               keep_days: opts["keep-days"] ? parseInt(opts["keep-days"]) : undefined,
             });
-            console.log(`✓ Link created:`);
-            printLink(link);
+            if (json) { console.log(JSON.stringify(link, null, 2)); }
+            else { console.log(`✓ Link created:`); printLink(link); }
+            break;
+          }
+          case "get": {
+            if (!target) { console.error("Usage: enke link get <slug> [--json]"); process.exit(1); }
+            const link = await getLink(target);
+            if (json) { console.log(JSON.stringify(link, null, 2)); }
+            else { printLinkDetail(link as unknown as Record<string, unknown>); }
             break;
           }
           case "list": {
-            const uid = await getUid();
-            const result = await listLinks({ uid, cursor: opts.cursor });
-            if (result.links.length === 0) { console.log("No links yet."); break; }
-            console.log(`Links (${result.links.length})${!result.list_complete ? " (more available)" : ""}:\n`);
-            for (const l of result.links) printLink(l);
+            const fetchAll = opts.all === "true";
+            if (fetchAll) {
+              const uid = await getUid();
+              const links = await fetchAllPages(async (cursor) => {
+                const r = await listLinks({ uid, cursor });
+                return { list_complete: r.list_complete, cursor: r.cursor, items: r.links };
+              });
+              if (json) { console.log(JSON.stringify(links, null, 2)); }
+              else {
+                if (links.length === 0) { console.log("No links yet."); break; }
+                console.log(`Links (${links.length} total):\n`);
+                for (const l of links) printLink(l);
+              }
+            } else {
+              const uid = await getUid();
+              const result = await listLinks({ uid, cursor: opts.cursor });
+              if (json) {
+                console.log(JSON.stringify(result, null, 2));
+              } else {
+                if (result.links.length === 0) { console.log("No links yet."); break; }
+                console.log(`Links (${result.links.length})${!result.list_complete ? " (more available)" : ""}${result.cursor ? ` — next: --cursor ${result.cursor}` : ""}:\n`);
+                for (const l of result.links) printLink(l);
+              }
+            }
             break;
           }
           case "stats": {
-            if (!target) { console.error("Usage: enke link stats <slug>"); process.exit(1); }
+            if (!target) { console.error("Usage: enke link stats <slug> [--json]"); process.exit(1); }
             const uid = await getUid();
             const stats = await getLinkStats(target, uid);
-            console.log(`Stats for "${target}":`);
-            console.log(`  Total visits:     ${stats.overview.total_visits}`);
-            console.log(`  Unique countries: ${stats.overview.unique_countries}`);
-            console.log(`  Unique referers:  ${stats.overview.unique_referers}`);
-            if (stats.time_series.length > 0) {
-              console.log(`  Daily:`);
-              for (const d of stats.time_series.slice(-7)) console.log(`    ${d.date}: ${d.visits}`);
-            }
-            if (stats.top_referers.length > 0) {
-              console.log(`  Top referrers:`);
-              for (const r of stats.top_referers.slice(0, 5)) console.log(`    ${r.label}: ${r.count}`);
-            }
-            if (stats.top_countries.length > 0) {
-              console.log(`  Top countries:`);
-              for (const c of stats.top_countries.slice(0, 5)) console.log(`    ${c.label}: ${c.count}`);
-            }
-            if (stats.devices.length > 0) {
-              console.log(`  Devices:`);
-              for (const d of stats.devices) console.log(`    ${d.label}: ${d.count}`);
+            if (json) {
+              console.log(JSON.stringify(stats, null, 2));
+            } else {
+              console.log(`Stats for "${target}":`);
+              console.log(`  Total visits:     ${stats.overview.total_visits}`);
+              console.log(`  Unique countries: ${stats.overview.unique_countries}`);
+              console.log(`  Unique referers:  ${stats.overview.unique_referers}`);
+              if (stats.time_series.length > 0) {
+                console.log(`  Daily:`);
+                for (const d of stats.time_series.slice(-7)) console.log(`    ${d.date}: ${d.visits}`);
+              }
+              if (stats.top_referers.length > 0) {
+                console.log(`  Top referrers:`);
+                for (const r of stats.top_referers.slice(0, 5)) console.log(`    ${r.label}: ${r.count}`);
+              }
+              if (stats.top_countries.length > 0) {
+                console.log(`  Top countries:`);
+                for (const c of stats.top_countries.slice(0, 5)) console.log(`    ${c.label}: ${c.count}`);
+              }
+              if (stats.devices.length > 0) {
+                console.log(`  Devices:`);
+                for (const d of stats.devices) console.log(`    ${d.label}: ${d.count}`);
+              }
             }
             break;
           }
@@ -261,13 +551,13 @@ async function main(): Promise<void> {
               url: opts.url,
               password: opts.password,
             });
-            console.log(`✓ Link updated:`);
-            printLink(updated);
+            if (json) { console.log(JSON.stringify(updated, null, 2)); }
+            else { console.log(`✓ Link updated:`); printLink(updated); }
             break;
           }
           default: {
             console.error(`Unknown sub-command: link ${sub}`);
-            console.error("Usage: enke link <create|list|stats|delete|update>");
+            console.error("Usage: enke link <create|get|list|stats|delete|update>");
             process.exit(1);
           }
         }
@@ -304,13 +594,14 @@ async function main(): Promise<void> {
 
         switch (sub) {
           case "upload": {
-            if (!target) { console.error("Usage: enke doc upload <file-path> [--exp-days 30] [--password x] [--comment x] [--burn] [--no-download] [--max-downloads 5]"); process.exit(1); }
+            if (!target) { console.error("Usage: enke doc upload <file-path> [--slug x] [--exp-days 30] [--password x] [--comment x] [--burn] [--no-download] [--max-downloads 5]"); process.exit(1); }
             const fs = await import("node:fs");
             const path = await import("node:path");
             const filePath = path.resolve(target);
             if (!fs.existsSync(filePath)) { console.error(`File not found: ${filePath}`); process.exit(1); }
             const filename = path.basename(filePath);
             const doc = await uploadDoc(filePath, filename, {
+              slug: opts.slug,
               exp_days: opts["exp-days"] ? parseInt(opts["exp-days"]) : undefined,
               password: opts.password,
               comment: opts.comment,
@@ -318,29 +609,58 @@ async function main(): Promise<void> {
               disable_download: opts["no-download"] === "true",
               max_downloads: opts["max-downloads"] ? parseInt(opts["max-downloads"]) : undefined,
             });
-            console.log(`✓ Document uploaded:`);
-            console.log(`  Slug:     ${doc.slug}`);
-            console.log(`  URL:      https://en.ke/${doc.slug}`);
-            console.log(`  File:     ${doc.filename} (${(doc.size / 1024).toFixed(1)} KB)`);
-            console.log(`  Expires:  ${doc.exp_days} days`);
+            if (json) {
+              console.log(JSON.stringify(doc, null, 2));
+            } else {
+              console.log(`✓ Document uploaded:`);
+              console.log(`  Slug:     ${doc.slug}`);
+              console.log(`  URL:      https://en.ke/${doc.slug}`);
+              console.log(`  File:     ${doc.filename} (${(doc.size / 1024).toFixed(1)} KB)`);
+              console.log(`  Expires:  ${doc.exp_days} days`);
+            }
             break;
           }
           case "list": {
-            const result = await listDocs(opts.cursor, opts.limit ? parseInt(opts.limit) : DEFAULT_PAGE_SIZE);
-            if (result.docs.length === 0) { console.log("No documents yet."); break; }
-            console.log(`Documents (${result.docs.length}):\n`);
-            for (const d of result.docs) {
-              console.log(`  Slug:     ${d.slug}`);
-              console.log(`  File:     ${d.filename} (${(d.size / 1024).toFixed(1)} KB)`);
-              console.log(`  Views:    ${d.view_count}  Downloads: ${d.download_count}/${d.max_downloads || "∞"}`);
-              if (d.burn_after_reading) console.log(`  Burn:     after first download`);
-              if (d.password) console.log(`  Lock:     password protected`);
-              console.log();
+            const fetchAll = opts.all === "true";
+            if (fetchAll) {
+              const docs = await fetchAllPages(async (cursor) => {
+                const r = await listDocs(cursor, DEFAULT_PAGE_SIZE);
+                return { list_complete: r.list_complete, cursor: r.cursor, items: r.docs };
+              });
+              if (json) { console.log(JSON.stringify(docs, null, 2)); }
+              else {
+                if (docs.length === 0) { console.log("No documents yet."); break; }
+                console.log(`Documents (${docs.length} total):\n`);
+                for (const d of docs) {
+                  console.log(`  Slug:     ${d.slug}`);
+                  console.log(`  File:     ${d.filename} (${(d.size / 1024).toFixed(1)} KB)`);
+                  console.log(`  Views:    ${d.view_count}  Downloads: ${d.download_count}/${d.max_downloads || "∞"}`);
+                  if (d.burn_after_reading) console.log(`  Burn:     after first download`);
+                  if (d.password) console.log(`  Lock:     password protected`);
+                  console.log();
+                }
+              }
+            } else {
+              const result = await listDocs(opts.cursor, opts.limit ? parseInt(opts.limit) : DEFAULT_PAGE_SIZE);
+              if (json) {
+                console.log(JSON.stringify(result, null, 2));
+              } else {
+                if (result.docs.length === 0) { console.log("No documents yet."); break; }
+                console.log(`Documents (${result.docs.length})${!result.list_complete ? " (more available)" : ""}:\n`);
+                for (const d of result.docs) {
+                  console.log(`  Slug:     ${d.slug}`);
+                  console.log(`  File:     ${d.filename} (${(d.size / 1024).toFixed(1)} KB)`);
+                  console.log(`  Views:    ${d.view_count}  Downloads: ${d.download_count}/${d.max_downloads || "∞"}`);
+                  if (d.burn_after_reading) console.log(`  Burn:     after first download`);
+                  if (d.password) console.log(`  Lock:     password protected`);
+                  console.log();
+                }
+              }
             }
             break;
           }
           case "get": {
-            if (!target) { console.error("Usage: enke doc get <slug>"); process.exit(1); }
+            if (!target) { console.error("Usage: enke doc get <slug> [--json]"); process.exit(1); }
             const d = await getDoc(target);
             console.log(JSON.stringify(d, null, 2));
             break;
@@ -352,7 +672,7 @@ async function main(): Promise<void> {
             break;
           }
           case "update": {
-            if (!target) { console.error("Usage: enke doc update <slug> [--exp-days 30] [--password x] [--comment x] [--burn] [--no-download] [--max-downloads 5]"); process.exit(1); }
+            if (!target) { console.error("Usage: enke doc update <slug> [--slug x] [--exp-days 30] [--password x] [--comment x] [--burn] [--no-download] [--max-downloads 5]"); process.exit(1); }
             const updated = await updateDoc(target, {
               exp_days: opts["exp-days"] ? parseInt(opts["exp-days"]) : undefined,
               password: opts.password,
@@ -361,20 +681,23 @@ async function main(): Promise<void> {
               disable_download: opts["no-download"] === "true" ? true : opts["no-download"] === "false" ? false : undefined,
               max_downloads: opts["max-downloads"] ? parseInt(opts["max-downloads"]) : undefined,
             });
-            console.log(`✓ Document updated: ${updated.slug}`);
+            if (json) { console.log(JSON.stringify(updated, null, 2)); }
+            else { console.log(`✓ Document updated: ${updated.slug}`); }
             break;
           }
           case "renew": {
             if (!target) { console.error("Usage: enke doc renew <slug>"); process.exit(1); }
             const renewed = await renewDoc(target);
-            console.log(`✓ Document renewed: ${renewed.slug} (${renewed.exp_days} days)`);
+            if (json) { console.log(JSON.stringify(renewed, null, 2)); }
+            else { console.log(`✓ Document renewed: ${renewed.slug} (${renewed.exp_days} days)`); }
             break;
           }
           case "expire": {
             const days = args[3];
             if (!target || !days) { console.error("Usage: enke doc expire <slug> <days>"); process.exit(1); }
             const exp = await editDocExpiration(target, parseInt(days));
-            console.log(`✓ Expiration set to ${parseInt(days)} days for ${exp.slug}`);
+            if (json) { console.log(JSON.stringify(exp, null, 2)); }
+            else { console.log(`✓ Expiration set to ${parseInt(days)} days for ${exp.slug}`); }
             break;
           }
           default: {
@@ -394,12 +717,12 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     if (err instanceof EnkeError) {
-      console.error(`Error: ${err.message}`);
+      printError(err, json);
       if (err.statusCode === 401) console.error("Run 'enke login' to authenticate.");
       else if (err.statusCode === 402) console.error("This feature requires a paid plan. Visit https://www.en.ke/pricing to upgrade.");
       else if (err.statusCode === 429) console.error("Quota exceeded. Upgrade your plan at https://www.en.ke/pricing for higher limits.");
     } else {
-      console.error("Error:", err instanceof Error ? err.message : String(err));
+      printError(err, json);
     }
     process.exit(1);
   }
@@ -419,12 +742,20 @@ const isMainModule = (() => {
 })();
 
 if (isMainModule) {
-  // Quick check for login state on any command except login/logout/help
+  // Quick check for login state on any command except those that don't need auth
   const cmd = process.argv[2];
-  if (cmd && !["login", "logout", "help", "--help", "-h", "version", "update"].includes(cmd)) {
+  if (cmd && !["login", "logout", "help", "--help", "-h", "version", "update", "completion"].includes(cmd)) {
     const cfg = loadConfig();
     if (!cfg) {
-      console.error("Not logged in. Run 'enke login' first.");
+      // Distinguish corrupt config from missing config
+      const configDir = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "enke");
+      const configFile = join(configDir, "config.json");
+      if (existsSync(configFile)) {
+        console.error(`Config file exists but could not be parsed: ${configFile}`);
+        console.error("The file may be corrupted. Run 'enke config clear' to reset, then 'enke login'.");
+      } else {
+        console.error("Not logged in. Run 'enke login' first.");
+      }
       process.exit(1);
     }
   }
