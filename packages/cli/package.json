@@ -4,7 +4,7 @@
   "description": "en.ke CLI — secure link & context relay for AI agents",
   "type": "module",
   "bin": {
-    "enke": "./dist/cli.js"
+    "enke": "dist/cli.js"
   },
   "main": "dist/cli.js",
   "files": [
@@ -15,7 +15,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "enke-sdk": "^1.2.2"
+    "enke-sdk": "^1.4.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
