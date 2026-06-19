@@ -95,14 +95,13 @@ Usage:
   enke mem forget <id>                Delete a memory
   enke mem list [--type t]            List all memories
   enke mem stats                      Memory statistics
-  enke mem key create [--name label]  Create API key for MCP/programmatic use
-  enke mem key list                   List API keys
-  enke mem key revoke <id>            Revoke an API key
   enke mem session create             Create a session
   enke mem session context <id>       Assemble context for prompt
   enke mem doc upload <file>          Upload document to knowledge base
   enke mem doc search <query>         Search documents
   enke mem doc list                   List uploaded documents
+  enke mcp                            Start MCP server (stdio mode)
+  enke mcp                            Start MCP server (SSE with ENKE_MCP_TRANSPORT=sse)
 
 Global flags:
   --json          Machine-readable JSON output
@@ -241,7 +240,7 @@ async function getUid(): Promise<string> {
 
 /** Generate shell completion script for bash or zsh. */
 function generateCompletion(shell: "bash" | "zsh"): string {
-  const TOP_CMDS = ["login", "logout", "whoami", "version", "update", "token", "config", "completion"];
+  const TOP_CMDS = ["login", "logout", "whoami", "version", "update", "token", "config", "completion", "link", "doc", "mem", "mcp"];
   const LINK_SUBS = ["create", "get", "list", "stats", "delete", "update"];
   const DOC_SUBS = ["upload", "list", "get", "delete", "update", "renew", "expire"];
   const MEM_SUBS = ["remember", "recall", "forget", "list", "stats", "session", "doc"];
@@ -824,57 +823,6 @@ async function main(): Promise<void> {
             break;
           }
 
-          case "key": {
-            const keySub = args[2];
-            if (!keySub) { console.error("Usage: enke mem key <create|list|revoke> [...]"); process.exit(1); }
-
-            switch (keySub) {
-              case "create": {
-                const name = args[3] ?? "cli";
-                const result = await mem.createApiKey(name);
-                if (json) { console.log(JSON.stringify(result, null, 2)); }
-                else {
-                  console.log(`✓ API key created:`);
-                  console.log(`  Key:    ${result.key}`);
-                  console.log(`  Prefix: ${result.key_prefix}`);
-                  console.log(`\n  Save this key — it won't be shown again!`);
-                  console.log(`  Use it for MCP: "MEM_API_KEY=${result.key}"`);
-                }
-                break;
-              }
-              case "list": {
-                const { keys } = await mem.listApiKeys();
-                if (json) { console.log(JSON.stringify({ keys }, null, 2)); }
-                else {
-                  if (keys.length === 0) { console.log("No API keys. Create one with: enke mem key create"); }
-                  else {
-                    console.log(`API Keys (${keys.length}):\n`);
-                    for (const k of keys) {
-                      const status = k.revoked_at ? "REVOKED" : "ACTIVE";
-                      console.log(`  ${k.id} | ${k.key_prefix}... | ${status} | ${k.name ?? ""}`);
-                      console.log(`  Created: ${k.created_at}  Permissions: ${k.permissions.join(", ")}`);
-                      if (k.last_used_at) console.log(`  Last used: ${k.last_used_at}`);
-                      console.log();
-                    }
-                  }
-                }
-                break;
-              }
-              case "revoke": {
-                const keyId = args[3];
-                if (!keyId) { console.error("Usage: enke mem key revoke <key-id>"); process.exit(1); }
-                await mem.revokeApiKey(keyId);
-                if (json) { console.log(JSON.stringify({ revoked: true, id: keyId }, null, 2)); }
-                else { console.log(`✓ API key ${keyId} revoked.`); }
-                break;
-              }
-              default:
-                console.error("Usage: enke mem key <create|list|revoke>");
-                process.exit(1);
-            }
-            break;
-          }
-
           case "session": {
             const sessionSub = args[2];
             if (!sessionSub) { console.error("Usage: enke mem session <create|context> [...]"); process.exit(1); }
@@ -967,6 +915,13 @@ async function main(): Promise<void> {
             process.exit(1);
           }
         }
+        break;
+      }
+
+      // ── mcp ──
+      case "mcp": {
+        const { runMcp } = await import("./mcp.js");
+        await runMcp();
         break;
       }
 
