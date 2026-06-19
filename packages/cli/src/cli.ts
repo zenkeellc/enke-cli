@@ -8,6 +8,7 @@ import {
   login, logout, loadConfig, getToken, clearConfig,
   shorten, listLinks, getLink, deleteLink, updateLink, getLinkStats,
   createLanding, whoami, EnkeError,
+  MemClient, MemApiError,
 } from "enke-sdk";
 
 const require = createRequire(import.meta.url);
@@ -88,6 +89,20 @@ Usage:
   enke doc update <slug> [opts]       Update document settings
   enke doc renew <slug>               Reset document expiration
   enke doc expire <slug> <days>       Set document expiration days
+
+  enke mem remember <content>         Store a memory for the AI agent
+  enke mem recall <query>             Search stored memories
+  enke mem forget <id>                Delete a memory
+  enke mem list [--type t]            List all memories
+  enke mem stats                      Memory statistics
+  enke mem key create [--name label]  Create API key for MCP/programmatic use
+  enke mem key list                   List API keys
+  enke mem key revoke <id>            Revoke an API key
+  enke mem session create             Create a session
+  enke mem session context <id>       Assemble context for prompt
+  enke mem doc upload <file>          Upload document to knowledge base
+  enke mem doc search <query>         Search documents
+  enke mem doc list                   List uploaded documents
 
 Global flags:
   --json          Machine-readable JSON output
@@ -229,7 +244,8 @@ function generateCompletion(shell: "bash" | "zsh"): string {
   const TOP_CMDS = ["login", "logout", "whoami", "version", "update", "token", "config", "completion"];
   const LINK_SUBS = ["create", "get", "list", "stats", "delete", "update"];
   const DOC_SUBS = ["upload", "list", "get", "delete", "update", "renew", "expire"];
-  const ALL = [...TOP_CMDS, ...LINK_SUBS.map(s => `link_${s}`), ...DOC_SUBS.map(s => `doc_${s}`), "landing_create", "help"];
+  const MEM_SUBS = ["remember", "recall", "forget", "list", "stats", "session", "doc"];
+  const ALL = [...TOP_CMDS, ...LINK_SUBS.map(s => `link_${s}`), ...DOC_SUBS.map(s => `doc_${s}`), ...MEM_SUBS.map(s => `mem_${s}`), "landing_create", "help"];
 
   if (shell === "bash") {
     return `# enke bash completion — source this file or add to ~/.bash_completion
@@ -249,6 +265,7 @@ _enke_completion() {
         token)  COMPREPLY=($(compgen -W "info" -- "$cur")) ;;
         config) COMPREPLY=($(compgen -W "show clear" -- "$cur")) ;;
         landing) COMPREPLY=($(compgen -W "create" -- "$cur")) ;;
+        mem)    COMPREPLY=($(compgen -W "${MEM_SUBS.join(" ")}" -- "$cur")) ;;
         completion) COMPREPLY=($(compgen -W "bash zsh" -- "$cur")) ;;
       esac
       ;;
@@ -262,10 +279,11 @@ complete -F _enke_completion enke`;
 # enke zsh completion — place in a directory in $fpath
 
 _enke() {
-  local -a top_cmds link_subs doc_subs
+  local -a top_cmds link_subs doc_subs mem_subs
   top_cmds=(${TOP_CMDS.join(" ")} help)
   link_subs=(${LINK_SUBS.join(" ")})
   doc_subs=(${DOC_SUBS.join(" ")})
+  mem_subs=(${MEM_SUBS.join(" ")})
 
   _arguments -C \\
     "1:command:(${TOP_CMDS.join(" ")} help)" \\
@@ -286,6 +304,9 @@ _enke() {
       ;;
     landing)
       _arguments "2:subcommand:(create)"
+      ;;
+    mem)
+      _arguments "2:subcommand:(${MEM_SUBS.join(" ")})"
       ;;
     completion)
       _arguments "2:shell:(bash zsh)"
@@ -703,6 +724,246 @@ async function main(): Promise<void> {
           default: {
             console.error(`Unknown sub-command: doc ${sub}`);
             console.error("Usage: enke doc <upload|list|get|delete|update|renew|expire>");
+            process.exit(1);
+          }
+        }
+        break;
+      }
+
+      // ── mem ──
+      case "mem": {
+        const sub = args[1];
+        if (!sub) { console.error("Usage: enke mem <remember|recall|forget|list|stats|session|doc> [...]"); process.exit(1); }
+
+        const mem = new MemClient();
+
+        switch (sub) {
+          case "remember": {
+            const content = args[2];
+            if (!content) { console.error("Usage: enke mem remember <content> [--type semantic|episodic|procedural] [--ttl buffer|working|permanent] [--importance 0.5] [--tags tag1,tag2]"); process.exit(1); }
+
+            const tags = opts.tags ? opts.tags.split(",").map(t => t.trim()) : undefined;
+            const m = await mem.remember({
+              content,
+              memory_type: (opts.type as "semantic" | "episodic" | "procedural") ?? "semantic",
+              ttl_level: (opts.ttl as "buffer" | "working" | "permanent") ?? "working",
+              importance: opts.importance ? parseFloat(opts.importance) : 0.5,
+              ...(tags ? { tags } : {}),
+            });
+
+            if (json) { console.log(JSON.stringify(m, null, 2)); }
+            else {
+              console.log(`✓ Memory stored: ${m.id}`);
+              console.log(`  Type: ${m.memory_type} | TTL: ${m.ttl_level} | Importance: ${m.importance}`);
+              console.log(`  ${m.content}`);
+            }
+            break;
+          }
+
+          case "recall": {
+            const query = args[2];
+            if (!query) { console.error("Usage: enke mem recall <query> [--limit 10] [--type semantic] [--threshold 0.5]"); process.exit(1); }
+
+            const results = await mem.recall(query, {
+              memory_type: opts.type as "semantic" | "episodic" | "procedural" | undefined,
+              limit: opts.limit ? parseInt(opts.limit) : 10,
+              threshold: opts.threshold ? parseFloat(opts.threshold) : undefined,
+            });
+
+            if (json) { console.log(JSON.stringify(results, null, 2)); }
+            else {
+              if (results.results.length === 0) { console.log("No matching memories found."); }
+              else {
+                console.log(`Found ${results.count} memories:\n`);
+                for (const m of results.results) {
+                  console.log(`  [${m.id}] ${m.memory_type} | ${m.ttl_level} | importance:${m.importance}`);
+                  console.log(`  ${m.content}\n`);
+                }
+              }
+            }
+            break;
+          }
+
+          case "forget": {
+            const id = args[2];
+            if (!id) { console.error("Usage: enke mem forget <memory-id>"); process.exit(1); }
+            const result = await mem.forget(id);
+            if (json) { console.log(JSON.stringify(result, null, 2)); }
+            else { console.log(`✓ Memory ${id} forgotten.`); }
+            break;
+          }
+
+          case "list": {
+            const results = await mem.list({
+              memory_type: opts.type,
+              limit: opts.limit ? parseInt(opts.limit) : 50,
+            });
+
+            if (json) { console.log(JSON.stringify(results, null, 2)); }
+            else {
+              if (results.results.length === 0) { console.log("No memories stored yet."); }
+              else {
+                console.log(`Memories (${results.count}):\n`);
+                for (const m of results.results) {
+                  console.log(`  ${m.id} | ${m.memory_type} | ${m.ttl_level} | ${m.created_at}`);
+                  console.log(`  ${m.content.slice(0, 80)}${m.content.length > 80 ? "..." : ""}\n`);
+                }
+              }
+            }
+            break;
+          }
+
+          case "stats": {
+            const stats = await mem.stats();
+            if (json) { console.log(JSON.stringify(stats, null, 2)); }
+            else {
+              console.log(`Total: ${stats.total} (active: ${stats.active}, archived: ${stats.archived})`);
+              console.log(`By type:  ${Object.entries(stats.by_type).map(([k, v]) => `${k}=${v}`).join(", ") || "none"}`);
+              console.log(`By TTL:   ${Object.entries(stats.by_ttl).map(([k, v]) => `${k}=${v}`).join(", ") || "none"}`);
+            }
+            break;
+          }
+
+          case "key": {
+            const keySub = args[2];
+            if (!keySub) { console.error("Usage: enke mem key <create|list|revoke> [...]"); process.exit(1); }
+
+            switch (keySub) {
+              case "create": {
+                const name = args[3] ?? "cli";
+                const result = await mem.createApiKey(name);
+                if (json) { console.log(JSON.stringify(result, null, 2)); }
+                else {
+                  console.log(`✓ API key created:`);
+                  console.log(`  Key:    ${result.key}`);
+                  console.log(`  Prefix: ${result.key_prefix}`);
+                  console.log(`\n  Save this key — it won't be shown again!`);
+                  console.log(`  Use it for MCP: "MEM_API_KEY=${result.key}"`);
+                }
+                break;
+              }
+              case "list": {
+                const { keys } = await mem.listApiKeys();
+                if (json) { console.log(JSON.stringify({ keys }, null, 2)); }
+                else {
+                  if (keys.length === 0) { console.log("No API keys. Create one with: enke mem key create"); }
+                  else {
+                    console.log(`API Keys (${keys.length}):\n`);
+                    for (const k of keys) {
+                      const status = k.revoked_at ? "REVOKED" : "ACTIVE";
+                      console.log(`  ${k.id} | ${k.key_prefix}... | ${status} | ${k.name ?? ""}`);
+                      console.log(`  Created: ${k.created_at}  Permissions: ${k.permissions.join(", ")}`);
+                      if (k.last_used_at) console.log(`  Last used: ${k.last_used_at}`);
+                      console.log();
+                    }
+                  }
+                }
+                break;
+              }
+              case "revoke": {
+                const keyId = args[3];
+                if (!keyId) { console.error("Usage: enke mem key revoke <key-id>"); process.exit(1); }
+                await mem.revokeApiKey(keyId);
+                if (json) { console.log(JSON.stringify({ revoked: true, id: keyId }, null, 2)); }
+                else { console.log(`✓ API key ${keyId} revoked.`); }
+                break;
+              }
+              default:
+                console.error("Usage: enke mem key <create|list|revoke>");
+                process.exit(1);
+            }
+            break;
+          }
+
+          case "session": {
+            const sessionSub = args[2];
+            if (!sessionSub) { console.error("Usage: enke mem session <create|context> [...]"); process.exit(1); }
+
+            switch (sessionSub) {
+              case "create": {
+                const session = await mem.createSession(opts.agent);
+                if (json) { console.log(JSON.stringify(session, null, 2)); }
+                else { console.log(`✓ Session created: ${session.id} (${session.status})`); }
+                break;
+              }
+              case "context": {
+                const sessionId = args[3];
+                if (!sessionId) { console.error("Usage: enke mem session context <session-id> [--limit 10]"); process.exit(1); }
+                const ctx = await mem.assembleContext(sessionId, opts.limit ? parseInt(opts.limit) : 10);
+                if (json) { console.log(JSON.stringify(ctx, null, 2)); }
+                else {
+                  console.log(`Session: ${ctx.session_id}`);
+                  console.log(`Active: ${ctx.active_memories.length} | Recalled: ${ctx.recalled_memories.length} | ~${ctx.token_estimate} tokens`);
+                }
+                break;
+              }
+              default:
+                console.error("Usage: enke mem session <create|context>");
+                process.exit(1);
+            }
+            break;
+          }
+
+          case "doc": {
+            const docSub = args[2];
+            if (!docSub) { console.error("Usage: enke mem doc <upload|search|list> [...]"); process.exit(1); }
+
+            switch (docSub) {
+              case "upload": {
+                const filePath = args[3];
+                if (!filePath) { console.error("Usage: enke mem doc upload <file-path> [--name filename]"); process.exit(1); }
+                const fs = await import("node:fs");
+                const path = await import("node:path");
+                const resolved = path.resolve(filePath);
+                if (!fs.existsSync(resolved)) { console.error(`File not found: ${resolved}`); process.exit(1); }
+                const filename = opts.name ?? path.basename(resolved);
+                const content = fs.readFileSync(resolved, "utf-8");
+                const doc = await mem.uploadDoc(filename, content);
+                if (json) { console.log(JSON.stringify(doc, null, 2)); }
+                else { console.log(`✓ Document uploaded: ${doc.id} (${doc.filename}, ${doc.chunk_count} chunks, ${doc.status})`); }
+                break;
+              }
+              case "search": {
+                const query = args[3];
+                if (!query) { console.error("Usage: enke mem doc search <query> [--limit 5]"); process.exit(1); }
+                const results = await mem.searchDocs(query, { limit: opts.limit ? parseInt(opts.limit) : 10 });
+                if (json) { console.log(JSON.stringify(results, null, 2)); }
+                else {
+                  if (results.results.length === 0) { console.log("No matching documents found."); }
+                  else {
+                    console.log(`Found ${results.count} chunks:\n`);
+                    for (const r of results.results) {
+                      console.log(`  [${r.filename}] chunk ${r.chunk_index} | score: ${r.score.toFixed(3)}`);
+                      console.log(`  ${r.content.slice(0, 120)}${r.content.length > 120 ? "..." : ""}\n`);
+                    }
+                  }
+                }
+                break;
+              }
+              case "list": {
+                const docs = await mem.listDocs();
+                if (json) { console.log(JSON.stringify(docs, null, 2)); }
+                else {
+                  if (docs.documents.length === 0) { console.log("No documents uploaded yet."); }
+                  else {
+                    console.log(`Documents (${docs.count}):\n`);
+                    for (const d of docs.documents) {
+                      console.log(`  ${d.id} | ${d.filename} | ${d.status} | ${d.chunk_count} chunks | ${d.created_at}`);
+                    }
+                  }
+                }
+                break;
+              }
+              default:
+                console.error("Usage: enke mem doc <upload|search|list>");
+                process.exit(1);
+            }
+            break;
+          }
+
+          default: {
+            console.error(`Unknown sub-command: mem ${sub}`);
+            console.error("Usage: enke mem <remember|recall|forget|list|stats|session|doc>");
             process.exit(1);
           }
         }

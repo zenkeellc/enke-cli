@@ -6,6 +6,15 @@ export type {
   WatermarkSettings,
 } from "./types.js";
 
+// Mem types
+export type {
+  Memory, CreateMemoryInput, SearchResponse as MemSearchResponse,
+  StatsResponse as MemStatsResponse, Session as MemSession,
+  AssembledContext as MemAssembledContext,
+  DocInfo as MemDocInfo, DocSearchResult as MemDocSearchResult,
+  MemoryType, TtlLevel,
+} from "./mem.js";
+
 // Auth
 export { login, logout, getToken, loadConfig, clearConfig, API_URL } from "./auth.js";
 
@@ -15,3 +24,6 @@ export {
   createLanding, whoami, EnkeError,
   uploadDoc, listDocs, getDoc, deleteDoc, updateDoc, renewDoc, editDocExpiration,
 } from "./client.js";
+
+// Mem Client
+export { MemClient, MemApiError } from "./mem.js";
