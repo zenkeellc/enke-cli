@@ -92,17 +92,6 @@ export interface DocSearchResult {
   score: number;
 }
 
-export interface ApiKeyInfo {
-  id: string;
-  tenant_id: string;
-  key_prefix: string;
-  name: string | null;
-  permissions: string[];
-  created_at: string;
-  last_used_at: string | null;
-  revoked_at: string | null;
-}
-
 export class MemApiError extends Error {
   code: string;
   status: number;
@@ -207,31 +196,6 @@ export class MemClient {
   async assembleContext(sessionId: string, limit?: number): Promise<AssembledContext> {
     const qs = limit ? `?limit=${limit}` : '';
     return this.request<AssembledContext>('GET', `/api/v1/sessions/${sessionId}/context${qs}`);
-  }
-
-  // ── API Key Management ──
-
-  /** Get current tenant info (ID, plan, status). */
-  async whoami(): Promise<{ id: string; name: string; plan: string; status: string }> {
-    return this.request('GET', '/api/v1/tenants/me');
-  }
-
-  /** Create an API key for programmatic/MCP access. */
-  async createApiKey(name?: string): Promise<{ id: string; key: string; key_prefix: string }> {
-    return this.request('POST', '/api/v1/tenants/me/keys', {
-      name: name ?? 'cli-generated',
-      permissions: ['read', 'write'],
-    });
-  }
-
-  /** List API keys (never returns full key, only prefix). */
-  async listApiKeys(): Promise<{ keys: ApiKeyInfo[]; count: number }> {
-    return this.request('GET', '/api/v1/tenants/me/keys');
-  }
-
-  /** Revoke an API key. */
-  async revokeApiKey(keyId: string): Promise<{ revoked: boolean; id: string }> {
-    return this.request('DELETE', `/api/v1/tenants/me/keys/${keyId}`);
   }
 
   // ── Documents ──
