@@ -91,7 +91,7 @@ Usage:
   enke doc expire <slug> <days>       Set document expiration days
 
   enke mem remember <content>         Store a memory for the AI agent
-  enke mem recall <query>             Search stored memories
+  enke mem recall <query>             Search memories & documents
   enke mem forget <id>                Delete a memory
   enke mem list [--type t]            List all memories
   enke mem stats                      Memory statistics
@@ -763,20 +763,45 @@ async function main(): Promise<void> {
             const query = args[2];
             if (!query) { console.error("Usage: enke mem recall <query> [--limit 10] [--type semantic] [--threshold 0.5]"); process.exit(1); }
 
-            const results = await mem.recall(query, {
-              memory_type: opts.type as "semantic" | "episodic" | "procedural" | undefined,
-              limit: opts.limit ? parseInt(opts.limit) : 10,
-              threshold: opts.threshold ? parseFloat(opts.threshold) : undefined,
-            });
+            const limit = opts.limit ? parseInt(opts.limit) : 10;
 
-            if (json) { console.log(JSON.stringify(results, null, 2)); }
-            else {
-              if (results.results.length === 0) { console.log("No matching memories found."); }
-              else {
-                console.log(`Found ${results.count} memories:\n`);
-                for (const m of results.results) {
-                  console.log(`  [${m.id}] ${m.memory_type} | ${m.ttl_level} | importance:${m.importance}`);
-                  console.log(`  ${m.content}\n`);
+            // Search both memories and documents in parallel
+            const [memResults, docResults] = await Promise.all([
+              mem.recall(query, {
+                memory_type: opts.type as "semantic" | "episodic" | "procedural" | undefined,
+                limit,
+                threshold: opts.threshold ? parseFloat(opts.threshold) : undefined,
+              }).catch(() => ({ results: [], query, count: 0 })),
+              mem.searchDocs(query, { limit }).catch(() => ({ results: [], query, count: 0 })),
+            ]);
+
+            if (json) {
+              console.log(JSON.stringify({
+                memories: memResults,
+                documents: docResults,
+                query,
+              }, null, 2));
+            } else {
+              const hasMems = memResults.results.length > 0;
+              const hasDocs = docResults.results.length > 0;
+
+              if (!hasMems && !hasDocs) {
+                console.log("No matching memories or documents found.");
+              } else {
+                if (hasMems) {
+                  console.log(`Memories (${memResults.count}):\n`);
+                  for (const m of memResults.results) {
+                    console.log(`  [${m.id}] ${m.memory_type} | ${m.ttl_level} | importance:${m.importance}`);
+                    console.log(`  ${m.content}\n`);
+                  }
+                }
+                if (hasDocs) {
+                  console.log(`Documents (${docResults.count}):\n`);
+                  for (const d of docResults.results) {
+                    const preview = d.content.length > 120 ? d.content.slice(0, 120) + "..." : d.content;
+                    console.log(`  [${d.document_id}] ${d.filename} | chunk:${d.chunk_index} | score:${d.score.toFixed(3)}`);
+                    console.log(`  ${preview}\n`);
+                  }
                 }
               }
             }
