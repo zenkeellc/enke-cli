@@ -1,6 +1,6 @@
 {
   "name": "enke-cli",
-  "version": "1.6.8",
+  "version": "1.6.9",
   "description": "en.ke CLI — secure link & context relay for AI agents. Includes MCP server.",
   "type": "module",
   "bin": {

@@ -10,7 +10,7 @@
  *   await mem.remember({ content: "用户叫Derek" });
  */
 
-import { getToken } from './auth.js';
+import { getToken, loadConfig } from './auth.js';
 
 /** Default mem-as-a-service API endpoint. Override with MEM_API_URL env var. */
 const DEFAULT_MEM_URL = 'https://mem-api.en.ke';
@@ -115,7 +115,14 @@ export class MemClient {
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const token = await getToken();
-    if (!token) throw new MemApiError('UNAUTHORIZED', 'Not logged in. Run: enke login', 401);
+    if (!token) {
+      const cfg = loadConfig();
+      if (cfg) {
+        const expDate = new Date(cfg.expiresAt * 1000).toLocaleString();
+        throw new MemApiError('TOKEN_EXPIRED', `Token expired (was valid until ${expDate}). Run: enke login`, 401);
+      }
+      throw new MemApiError('UNAUTHORIZED', 'Not logged in. Run: enke login', 401);
+    }
 
     const url = `${this.baseUrl}${path}`;
     const res = await fetch(url, {

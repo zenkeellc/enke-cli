@@ -369,7 +369,16 @@ async function main(): Promise<void> {
       case "login": {
         console.log("Opening browser for login...");
         const cfg = await login();
-        console.log(`✓ Logged in. Token valid until ${new Date(cfg.expiresAt * 1000).toLocaleString()}`);
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (cfg.expiresAt <= nowSec) {
+          console.error(`⚠ Token already expired (valid until ${new Date(cfg.expiresAt * 1000).toLocaleString()}).`);
+          console.error(`  The auth server may have a clock issue. Try again, or check system time.`);
+          console.error(`  System time: ${new Date().toLocaleString()}`);
+          process.exit(1);
+        }
+        const ttlHours = (cfg.expiresAt - nowSec) / 3600;
+        const ttlStr = ttlHours < 1 ? `${Math.round(ttlHours * 60)}m` : `${ttlHours.toFixed(1)}h`;
+        console.log(`✓ Logged in. Token TTL: ${ttlStr} (until ${new Date(cfg.expiresAt * 1000).toLocaleString()})`);
         process.exit(0);
       }
       case "logout": {
