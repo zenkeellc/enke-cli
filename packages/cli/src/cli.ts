@@ -25,6 +25,22 @@ function debug(...args: unknown[]): void {
   if (VERBOSE) console.error("[DEBUG]", ...args);
 }
 
+/** Truncate and sanitize text for terminal display — strip binary garbage. */
+function safePreview(text: string, maxLen = 120): string {
+  // If content is >30% non-printable, it's probably binary
+  let nonPrintable = 0;
+  const sample = text.slice(0, 200);
+  for (const ch of sample) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) nonPrintable++;
+  }
+  if (nonPrintable > sample.length * 0.3) {
+    return "[binary content — text extraction not available]";
+  }
+  const clean = text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, '');
+  return clean.length > maxLen ? clean.slice(0, maxLen) + "..." : clean;
+}
+
 /** Print a structured error, surfacing errorCode and params for scripting. */
 function printError(err: unknown, asJson: boolean): void {
   if (err instanceof EnkeError) {
@@ -798,7 +814,7 @@ async function main(): Promise<void> {
                 if (hasDocs) {
                   console.log(`Documents (${docResults.count}):\n`);
                   for (const d of docResults.results) {
-                    const preview = d.content.length > 120 ? d.content.slice(0, 120) + "..." : d.content;
+                    const preview = safePreview(d.content, 120);
                     console.log(`  [${d.document_id}] ${d.filename} | chunk:${d.chunk_index} | score:${d.score.toFixed(3)}`);
                     console.log(`  ${preview}\n`);
                   }
@@ -890,8 +906,22 @@ async function main(): Promise<void> {
                 const resolved = path.resolve(filePath);
                 if (!fs.existsSync(resolved)) { console.error(`File not found: ${resolved}`); process.exit(1); }
                 const filename = opts.name ?? path.basename(resolved);
-                const content = fs.readFileSync(resolved, "utf-8");
-                const doc = await mem.uploadDoc(filename, content);
+                const ext = path.extname(resolved).toLowerCase();
+
+                // Binary files: read as base64, extract text server-side
+                const binaryExts = ['.docx', '.pdf', '.doc', '.odt', '.rtf'];
+                const isBinary = binaryExts.includes(ext);
+                const content = isBinary
+                  ? fs.readFileSync(resolved).toString('base64')
+                  : fs.readFileSync(resolved, 'utf-8');
+                const mimeType = ext === '.docx'
+                  ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                  : ext === '.pdf' ? 'application/pdf' : 'text/plain';
+
+                const doc = await mem.uploadDoc(filename, content, {
+                  encoding: isBinary ? 'base64' : 'utf-8',
+                  mime_type: mimeType,
+                });
                 if (json) { console.log(JSON.stringify(doc, null, 2)); }
                 else { console.log(`✓ Document uploaded: ${doc.id} (${doc.filename}, ${doc.chunk_count} chunks, ${doc.status})`); }
                 break;

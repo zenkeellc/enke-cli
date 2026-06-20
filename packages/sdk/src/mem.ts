@@ -200,13 +200,19 @@ export class MemClient {
 
   // ── Documents ──
 
-  /** Upload a document to the knowledge base. */
-  async uploadDoc(filename: string, content: string): Promise<DocInfo> {
-    return this.request<DocInfo>('POST', '/api/v1/documents', {
+  /** Upload a document to the knowledge base. Pass encoding='base64' for binary files. */
+  async uploadDoc(
+    filename: string,
+    content: string,
+    opts?: { encoding?: 'utf-8' | 'base64'; mime_type?: string },
+  ): Promise<DocInfo> {
+    const body: Record<string, unknown> = {
       filename,
       content,
-      mime_type: 'text/plain',
-    });
+      mime_type: opts?.mime_type ?? 'text/plain',
+    };
+    if (opts?.encoding === 'base64') body.encoding = 'base64';
+    return this.request<DocInfo>('POST', '/api/v1/documents', body);
   }
 
   /** Search uploaded documents. */
