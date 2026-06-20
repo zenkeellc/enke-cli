@@ -908,15 +908,30 @@ async function main(): Promise<void> {
                 const filename = opts.name ?? path.basename(resolved);
                 const ext = path.extname(resolved).toLowerCase();
 
-                // Binary files: read as base64, extract text server-side
-                const binaryExts = ['.docx', '.pdf', '.doc', '.odt', '.rtf'];
+                // MIME type detection — all supported + unsupported formats
+                const MIME_MAP: Record<string, string> = {
+                  '.txt': 'text/plain',
+                  '.md': 'text/markdown',
+                  '.csv': 'text/csv',
+                  '.json': 'application/json',
+                  '.xml': 'text/xml',
+                  '.html': 'text/html',
+                  '.htm': 'text/html',
+                  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                  '.pdf': 'application/pdf',
+                  '.doc': 'application/msword',
+                  '.xls': 'application/vnd.ms-excel',
+                };
+                const mimeType = MIME_MAP[ext] ?? 'text/plain';
+
+                // ZIP-based Office formats + PDF/DOC/XLS: read as base64
+                const binaryExts = ['.docx', '.xlsx', '.pptx', '.pdf', '.doc', '.xls'];
                 const isBinary = binaryExts.includes(ext);
                 const content = isBinary
                   ? fs.readFileSync(resolved).toString('base64')
                   : fs.readFileSync(resolved, 'utf-8');
-                const mimeType = ext === '.docx'
-                  ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-                  : ext === '.pdf' ? 'application/pdf' : 'text/plain';
 
                 const doc = await mem.uploadDoc(filename, content, {
                   encoding: isBinary ? 'base64' : 'utf-8',
