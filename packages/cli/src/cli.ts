@@ -116,6 +116,7 @@ Usage:
   enke mem doc upload <file>          Upload document to knowledge base
   enke mem doc search <query>         Search documents
   enke mem doc list                   List uploaded documents
+  enke mem doc delete <id>            Delete a document (files + vectors)
   enke mcp                            Start MCP server (stdio mode)
   enke mcp                            Start MCP server (SSE with ENKE_MCP_TRANSPORT=sse)
 
@@ -895,7 +896,7 @@ async function main(): Promise<void> {
 
           case "doc": {
             const docSub = args[2];
-            if (!docSub) { console.error("Usage: enke mem doc <upload|search|list> [...]"); process.exit(1); }
+            if (!docSub) { console.error("Usage: enke mem doc <upload|search|list|delete> [...]"); process.exit(1); }
 
             switch (docSub) {
               case "upload": {
@@ -972,8 +973,16 @@ async function main(): Promise<void> {
                 }
                 break;
               }
+              case "delete": {
+                const docId = args[3];
+                if (!docId) { console.error("Usage: enke mem doc delete <document-id>"); process.exit(1); }
+                const result = await mem.deleteDoc(docId);
+                if (json) { console.log(JSON.stringify(result, null, 2)); }
+                else { console.log(`✓ Document ${result.id} deleted (files + vectors removed).`); }
+                break;
+              }
               default:
-                console.error("Usage: enke mem doc <upload|search|list>");
+                console.error("Usage: enke mem doc <upload|search|list|delete>");
                 process.exit(1);
             }
             break;

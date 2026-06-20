@@ -229,4 +229,9 @@ export class MemClient {
   async listDocs(): Promise<{ documents: DocInfo[]; count: number }> {
     return this.request('GET', '/api/v1/documents');
   }
+
+  /** Delete a document and all its chunks + vectors. */
+  async deleteDoc(id: string): Promise<{ deleted: boolean; id: string }> {
+    return this.request('DELETE', `/api/v1/documents/${id}`);
+  }
 }
