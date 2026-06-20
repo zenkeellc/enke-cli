@@ -172,18 +172,73 @@ export async function getToken(): Promise<string | null> {
   const cfg = loadConfig();
   if (!cfg) return null;
 
-  // Check if token is still valid (with 60s buffer)
-  if (cfg.expiresAt > Math.floor(Date.now() / 1000) + 60) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const ttl = cfg.expiresAt - nowSec;
+
+  // Token still valid (with 60s buffer)
+  if (ttl > 60) {
     return cfg.token;
   }
 
-  // Use in-memory lock to prevent concurrent refresh
+  // Token expired or about to expire — try refresh
+  if (ttl <= 0) {
+    // Don't clear config yet — try refresh first
+    if (refreshLock) return refreshLock;
+
+    refreshLock = (async () => {
+      try {
+        const latestCfg = loadConfig();
+        if (!latestCfg) return null;
+
+        const res = await fetch(`${latestCfg.userApiUrl}/api/v1/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refreshToken: latestCfg.refreshToken }),
+        });
+
+        if (!res.ok) {
+          // Only clear on 401 (refresh token invalid/revoked)
+          // Network errors or 5xx: keep config so user can retry
+          if (res.status === 401 || res.status === 403) {
+            clearConfig();
+          }
+          return null;
+        }
+        const data = await res.json() as { data?: { token?: string; refreshToken?: string } };
+        const newToken = data.data?.token;
+        const newRefresh = data.data?.refreshToken;
+        if (!newToken || !newRefresh) {
+          clearConfig();
+          return null;
+        }
+
+        const expiresAt = decodeJwtExp(newToken);
+        const newCfg: AuthConfig = { ...latestCfg, token: newToken, refreshToken: newRefresh, expiresAt };
+        saveConfig(newCfg);
+        return newToken;
+      } catch {
+        // Network error: keep config, return null so caller shows clear error
+        return null;
+      } finally {
+        refreshLock = null;
+      }
+    })();
+
+    return refreshLock;
+  }
+
+  // Token expires within 60s — use in-memory lock to prevent concurrent refresh
   if (refreshLock) return refreshLock;
 
   refreshLock = (async () => {
     try {
       const latestCfg = loadConfig();
       if (!latestCfg) return null;
+
+      // Re-check: maybe another refresh already fixed it
+      if (latestCfg.expiresAt > Math.floor(Date.now() / 1000) + 60) {
+        return latestCfg.token;
+      }
 
       const res = await fetch(`${latestCfg.userApiUrl}/api/v1/refresh`, {
         method: "POST",
@@ -192,8 +247,7 @@ export async function getToken(): Promise<string | null> {
       });
 
       if (!res.ok) {
-        // Only clear config on 401 (invalid/expired refresh token), not on network errors
-        if (res.status === 401) clearConfig();
+        if (res.status === 401 || res.status === 403) clearConfig();
         return null;
       }
       const data = await res.json() as { data?: { token?: string; refreshToken?: string } };
@@ -209,7 +263,6 @@ export async function getToken(): Promise<string | null> {
       saveConfig(newCfg);
       return newToken;
     } catch {
-      // Network errors: don't clear config, just return stale token as best effort
       const cfg = loadConfig();
       return cfg?.token ?? null;
     } finally {
