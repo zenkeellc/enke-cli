@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import {
   EnkeShareClient,
   parseChatExport,
+  createZip,
   type ShareInput as CoreShareInput,
 } from '@enke/core';
 import type { ShareRecordV1 } from '@enke/protocol';
@@ -30,6 +31,12 @@ export interface SendShareOptions {
 function expiryDays(seconds?: number): number {
   if (!seconds) return 7;
   return Math.max(1, Math.min(365, Math.round(seconds / 86400)));
+}
+
+const DIRECT_EXT = /\.(pdf|png|jpe?g|gif|webp|svg|bmp|tiff?|txt|csv|md|xml|html?|css|js|mjs|json|ts|tsx|jsx|docx?|xlsx?|pptx?|zip|gz|tar|7z|mp4|webm|mp3|wav|ogg)$/i;
+
+function directFile(name: string): boolean {
+  return DIRECT_EXT.test(name);
 }
 
 function safeName(value: string): string {
@@ -103,18 +110,16 @@ async function sendViaApi(options: SendShareOptions, chat: ReturnType<typeof par
   if (options.visibility === 'private') {
     throw new Error('api.en.ke 文档分享没有“仅自己可见”模式；私有分享需要部署 enke-share worker，或改用本地文件。');
   }
-  if (files.length > 1) {
-    throw new Error('api.en.ke 文档接口一次只接收一个文件；多文件请先打包成 zip。');
-  }
-
   // 纯 URL → 现有短链 API
   if (options.url && files.length === 0 && !options.text && !chat) {
     const link = await shorten(options.url, { keep_days: expiryDays(options.expiresIn) });
     return { id: link.slug, shortUrl: link.shortUrl, kind: 'link' };
   }
 
-  // 单文件 → 现有文档分享 API
-  if (files.length === 1) {
+  // 单文件且服务端支持该类型 → 直接上传
+  const direct = files.length === 1 && !options.text && !options.url && !chat
+    && directFile(files[0]!);
+  if (direct) {
     const path = resolve(files[0]!);
     const doc = await uploadDoc(path, basename(path), {
       exp_days: expiryDays(options.expiresIn),
@@ -126,6 +131,44 @@ async function sendViaApi(options: SendShareOptions, chat: ReturnType<typeof par
       kind: /\.(png|jpe?g|gif|webp)$/i.test(doc.filename) ? 'image' : 'file',
       ...(options.title ? { title: options.title } : {}),
     };
+  }
+
+  // 多文件 / 任意二进制 / 文件+文字混合 → 打成一个 zip
+  if (files.length > 0) {
+    const entries: Array<{ name: string; data: Uint8Array | string }> = [];
+    const note = [options.url, options.text].filter(Boolean).join('\n\n');
+    if (note) entries.push({ name: 'note.md', data: note });
+    if (chat) {
+      const chatLines = [`# ${chat.chat.conversation.name || 'Chat export'}`, '', `Provider: ${chat.chat.provider}`, ''];
+      for (const message of chat.chat.messages) {
+        const when = message.sentAt ? new Date(message.sentAt).toISOString() : '';
+        chatLines.push(`${when} ${message.sender}: ${message.text ?? `[${message.type}]`}`.trim());
+      }
+      entries.push({ name: 'chat.md', data: chatLines.join('\n') });
+    }
+    for (const file of files) {
+      const path = resolve(file);
+      entries.push({ name: basename(path), data: new Uint8Array(await readFile(path)) });
+    }
+    const zip = createZip(entries);
+    const filename = `${safeName(options.title || chat?.chat.conversation.name || 'enke-share')}.zip`;
+    const dir = await mkdtemp(join(tmpdir(), 'enke-share-'));
+    const path = join(dir, filename);
+    try {
+      await writeFile(path, zip);
+      const doc = await uploadDoc(path, filename, {
+        exp_days: expiryDays(options.expiresIn),
+        ...(options.title ? { comment: options.title.slice(0, 500) } : {}),
+      });
+      return {
+        id: doc.slug,
+        shortUrl: `https://en.ke/${doc.slug}`,
+        kind: chat ? 'chat' : 'file',
+        ...(options.title ? { title: options.title } : {}),
+      };
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   }
 
   // 文本 / 聊天 → 生成 Markdown，再走文档分享 API

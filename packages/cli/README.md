@@ -67,7 +67,8 @@ enke share devices --json
 默认直接复用 en.ke 现有线上 API，不依赖 `share.en.ke`：
 
 - URL → `POST https://api.en.ke/api/v1/links`，得到 `https://en.ke/{slug}`
-- 文本 / 聊天导出 / 单文件 → `POST https://api.en.ke/api/v1/docs`，得到 `https://en.ke/{slug}`
+- 文本 / 聊天导出 / 文件 → `POST https://api.en.ke/api/v1/docs`，得到 `https://en.ke/{slug}`
+- 多文件、任意二进制或“文件+文字/链接”混合 → 自动打成一个 zip 再上传（服务端接受 `application/zip`）
 
 完整的设备收件箱 / 实时 / ESP32 功能需要单独部署 `enke-share` worker，并显式设置
 `ENKE_SHARE_API_URL=https://<your-worker>/v1`。不设置时不会访问任何不存在的域名。

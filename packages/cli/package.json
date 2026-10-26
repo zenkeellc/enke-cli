@@ -1,7 +1,7 @@
 {
   "name": "enke-cli",
   "version": "1.8.0",
-  "description": "en.ke CLI \u2014 secure link & context relay for AI agents. Includes MCP server.",
+  "description": "en.ke CLI — secure link & context relay for AI agents. Includes MCP server.",
   "type": "module",
   "bin": {
     "enke": "dist/enke.js"
@@ -20,11 +20,11 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "typescript": "^5.6.0",
     "@enke/core": "file:../../vendor/enke-core-0.1.0.tgz",
     "@enke/protocol": "file:../../vendor/enke-protocol-0.1.0.tgz",
-    "esbuild": "^0.25.12"
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.6.0"
   },
   "license": "MIT",
   "repository": {
