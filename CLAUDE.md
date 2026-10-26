@@ -8,6 +8,7 @@ CLI tool for en.ke — URL shortening, file sharing, landing pages for AI agents
 packages/
   sdk/     — enke-sdk: shared auth, API client, types
   cli/     — enke-cli: the CLI entry point
+vendor/    — @enke/core / @enke/protocol tarballs (internal, not npm-published)
 release.sh — release script (runs tests → build → publish → tag → GitHub release)
 ```
 
@@ -53,6 +54,9 @@ Key design decisions:
 
 ### enke-cli (`packages/cli/`)
 - `cli.ts` — Argument parsing (`parseArgs`, `getPositionalArgs`), command routing, `printLink`
+- `share.ts` — enke Share client (text / URL / files); uses internal `@enke/core`
+- `mcp.ts` — MCP server; includes `share_send`, `devices_list`, `device_pair_start`
+- `scripts/bundle.mjs` — esbuild bundle inlines `@enke/core` into `dist/enke.js`
 
 ## Release Process
 
@@ -68,7 +72,7 @@ Key design decisions:
 3. **Type-check**: `npm run type-check -w packages/sdk && npm run type-check -w packages/cli`
 4. **Bump**: `npm version <version> --no-git-tag-version` in both sdk and cli
 5. **Build**: `npm run build -w packages/sdk && npm run build -w packages/cli`
-6. **Publish**: `npm publish -w packages/sdk --access public` first, then CLI
+6. **Publish**: `npm publish -w packages/sdk --access public` first, then CLI (the CLI tarball is a self-contained `dist/enke.js`; `@enke/core` is bundled, not a runtime dependency)
 7. **Verify**: `npm view enke-sdk version` / `npm view enke-cli version`
 8. **Git**: commit version bumps, tag `v<version>`, push to origin
 9. **GitHub Release**: `gh release create v<version>` on `zenkeellc/enke-cli`

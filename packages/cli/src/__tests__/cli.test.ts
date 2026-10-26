@@ -161,6 +161,37 @@ describe("command routing", () => {
     expect(pos[2]).toBe("My Title");
   });
 
+  it("share send: text + options", () => {
+    const pos = getPositionalArgs(["node", "enke", "share", "send", "hello", "world", "--title", "Note", "--expires", "7d"]);
+    const opts = parseArgs(["node", "enke", "share", "send", "hello", "world", "--title", "Note", "--expires", "7d"]);
+    expect(pos).toEqual(["share", "send", "hello", "world"]);
+    expect(opts.title).toBe("Note");
+    expect(opts.expires).toBe("7d");
+  });
+
+  it("share send: files/url options", () => {
+    const opts = parseArgs(["node", "enke", "share", "send", "--url", "https://example.com", "--files", "a.pdf,b.png", "--visibility", "private"]);
+    const pos = getPositionalArgs(["node", "enke", "share", "send", "--url", "https://example.com", "--files", "a.pdf,b.png", "--visibility", "private"]);
+    expect(pos).toEqual(["share", "send"]);
+    expect(opts.url).toBe("https://example.com");
+    expect(opts.files).toBe("a.pdf,b.png");
+    expect(opts.visibility).toBe("private");
+  });
+
+  it("share url", () => {
+    const pos = getPositionalArgs(["node", "enke", "share", "url", "https://example.com", "--expires=30m"]);
+    const opts = parseArgs(["node", "enke", "share", "url", "https://example.com", "--expires=30m"]);
+    expect(pos).toEqual(["share", "url", "https://example.com"]);
+    expect(opts.expires).toBe("30m");
+  });
+
+  it("share devices", () => {
+    const pos = getPositionalArgs(["node", "enke", "share", "devices", "--json"]);
+    const opts = parseArgs(["node", "enke", "share", "devices", "--json"]);
+    expect(pos).toEqual(["share", "devices"]);
+    expect(opts.json).toBe("true");
+  });
+
   it("whoami", () => {
     const pos = getPositionalArgs(["node", "enke", "whoami"]);
     expect(pos[0]).toBe("whoami");

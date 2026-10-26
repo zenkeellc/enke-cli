@@ -45,6 +45,9 @@ enke link create https://example.com --keep-days 7
 | `enke doc renew <slug>` | Reset document expiration |
 | `enke doc expire <slug> <days>` | Set document expiration days |
 | `enke doc delete <slug>` | Delete a shared document |
+| `enke share send [text]` | Share text / URL / files to en.ke |
+| `enke share url <url>` | Share a URL |
+| `enke share devices` | List paired devices |
 
 ### Landing Pages
 

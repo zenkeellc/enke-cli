@@ -10,6 +10,9 @@ import {
   createLanding, whoami, EnkeError,
   MemClient, MemApiError,
 } from "enke-sdk";
+import { EnkeShareError } from "@enke/core";
+import type { ShareRecordV1 } from "@enke/protocol";
+import { sendShare, sharePageUrl, createShareClient } from "./share.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { name: string; version: string };
@@ -43,7 +46,20 @@ function safePreview(text: string, maxLen = 120): string {
 
 /** Print a structured error, surfacing errorCode and params for scripting. */
 function printError(err: unknown, asJson: boolean): void {
-  if (err instanceof EnkeError) {
+  if (err instanceof EnkeShareError) {
+    if (asJson) {
+      console.log(JSON.stringify({
+        error: true,
+        message: err.message,
+        code: err.code,
+        status: err.status,
+        retryable: err.retryable,
+      }, null, 2));
+    } else {
+      console.error(`Error (${err.status || "share"}) [${err.code}]: ${err.message}`);
+      if (err.code === "unauthorized") console.error("Run 'enke login' to authenticate.");
+    }
+  } else if (err instanceof EnkeError) {
     if (asJson) {
       console.log(JSON.stringify({
         error: true,
@@ -106,6 +122,10 @@ Usage:
   enke doc renew <slug>               Reset document expiration
   enke doc expire <slug> <days>       Set document expiration days
 
+  enke share send [text] [opts]       Share text / URL / files to en.ke
+  enke share url <url> [opts]         Share a URL
+  enke share devices                  List paired devices
+
   enke mem remember <content>         Store a memory for the AI agent
   enke mem recall <query>             Search memories & documents
   enke mem forget <id>                Delete a memory
@@ -141,6 +161,13 @@ Options (doc upload/update):
   --no-download       Preview only, no download button
   --max-downloads <n> Max download count
 
+Options (share send):
+  --url <url>         Also share a link
+  --title <text>      Share title
+  --files a,b         Comma-separated file paths
+  --visibility link   link (default) or private
+  --expires 7d        Expiry: 30m / 24h / 7d / 3600
+
 Shell completion:
   enke completion bash    Output bash completion script
   enke completion zsh     Output zsh completion script
@@ -151,6 +178,10 @@ Examples:
   enke link create https://example.com --slug my-link --keep-days 7
   enke link list --all --json
   enke doc upload ./report.pdf --exp-days 7 --password secret123
+  enke share send "hello" --title "Note"
+  enke share send --url https://example.com --expires 7d
+  enke share send --files ./a.pdf,./b.png
+  enke share devices --json
   enke token info --json
 `);
 }
@@ -257,10 +288,11 @@ async function getUid(): Promise<string> {
 
 /** Generate shell completion script for bash or zsh. */
 function generateCompletion(shell: "bash" | "zsh"): string {
-  const TOP_CMDS = ["login", "logout", "whoami", "version", "update", "token", "config", "completion", "link", "doc", "mem", "mcp"];
+  const TOP_CMDS = ["login", "logout", "whoami", "version", "update", "token", "config", "completion", "link", "doc", "mem", "share", "mcp"];
   const LINK_SUBS = ["create", "get", "list", "stats", "delete", "update"];
   const DOC_SUBS = ["upload", "list", "get", "delete", "update", "renew", "expire"];
   const MEM_SUBS = ["remember", "recall", "forget", "list", "stats", "session", "doc"];
+  const SHARE_SUBS = ["send", "url", "devices"];
   const ALL = [...TOP_CMDS, ...LINK_SUBS.map(s => `link_${s}`), ...DOC_SUBS.map(s => `doc_${s}`), ...MEM_SUBS.map(s => `mem_${s}`), "landing_create", "help"];
 
   if (shell === "bash") {
@@ -282,6 +314,7 @@ _enke_completion() {
         config) COMPREPLY=($(compgen -W "show clear" -- "$cur")) ;;
         landing) COMPREPLY=($(compgen -W "create" -- "$cur")) ;;
         mem)    COMPREPLY=($(compgen -W "${MEM_SUBS.join(" ")}" -- "$cur")) ;;
+        share)  COMPREPLY=($(compgen -W "${SHARE_SUBS.join(" ")}" -- "$cur")) ;;
         completion) COMPREPLY=($(compgen -W "bash zsh" -- "$cur")) ;;
       esac
       ;;
@@ -324,6 +357,9 @@ _enke() {
     mem)
       _arguments "2:subcommand:(${MEM_SUBS.join(" ")})"
       ;;
+    share)
+      _arguments "2:subcommand:(${SHARE_SUBS.join(" ")})"
+      ;;
     completion)
       _arguments "2:shell:(bash zsh)"
       ;;
@@ -343,6 +379,28 @@ async function checkLatestVersion(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+function parseExpires(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  if (/^\d+$/.test(value)) return parseInt(value, 10);
+  const match = /^(\d+)([smhd])$/.exec(value);
+  if (!match) throw new Error(`Invalid --expires value: ${value} (use 30m, 24h, 7d or seconds)`);
+  const amount = parseInt(match[1]!, 10);
+  const unit = match[2];
+  const factor = unit === "s" ? 1 : unit === "m" ? 60 : unit === "h" ? 3600 : 86400;
+  return amount * factor;
+}
+
+function printShare(share: ShareRecordV1): void {
+  console.log(`  URL:        ${sharePageUrl(share)}`);
+  console.log(`  ID:         ${share.id}`);
+  console.log(`  Kind:       ${share.kind}`);
+  console.log(`  Visibility: ${share.visibility}`);
+  if (share.title) console.log(`  Title:      ${share.title}`);
+  if (share.items.length > 0) console.log(`  Files:      ${share.items.length}`);
+  if (share.expiresAt) console.log(`  Expires:    ${new Date(share.expiresAt).toISOString()}`);
+  console.log();
 }
 
 async function main(): Promise<void> {
@@ -1002,6 +1060,74 @@ async function main(): Promise<void> {
             console.error("Usage: enke mem <remember|recall|forget|list|stats|session|doc>");
             process.exit(1);
           }
+        }
+        break;
+      }
+
+      // ── share ──
+      case "share": {
+        const sub = args[1];
+        if (!sub || sub === "help") {
+          console.error("Usage: enke share <send|url|devices> [...]");
+          console.error("  enke share send [text] [--url u] [--files a,b] [--title t] [--visibility link|private] [--expires 7d]");
+          console.error("  enke share url <url> [opts]");
+          console.error("  enke share devices [--json]");
+          process.exit(1);
+        }
+
+        if (sub === "devices") {
+          const client = createShareClient(VERSION);
+          const response = await client.api.listDevices();
+          if (json) {
+            console.log(JSON.stringify(response, null, 2));
+          } else if (response.devices.length === 0) {
+            console.log("No paired devices.");
+          } else {
+            console.log(`Devices (${response.devices.length}):\n`);
+            for (const device of response.devices) {
+              const online = device.online === undefined ? "" : device.online ? " online" : " offline";
+              console.log(`  ${device.id}  ${device.name}  [${device.platform}${online}]`);
+            }
+          }
+          break;
+        }
+
+        if (sub !== "send" && sub !== "url") {
+          console.error(`Unknown share sub-command: ${sub}`);
+          console.error("Usage: enke share <send|url|devices>");
+          process.exit(1);
+        }
+
+        const url = sub === "url" ? args[2] : opts.url;
+        const text = sub === "send" ? args.slice(2).join(" ").trim() : "";
+        const files = (opts.files ?? "").split(",").map((f) => f.trim()).filter(Boolean);
+        if (!url && !text && files.length === 0) {
+          console.error("Nothing to share. Pass text, --url, or --files.");
+          process.exit(1);
+        }
+        const visibility = opts.visibility === "private" ? "private" : "link";
+        const expiresIn = parseExpires(opts.expires);
+        const share = await sendShare({
+          version: VERSION,
+          ...(text ? { text } : {}),
+          ...(url ? { url } : {}),
+          ...(opts.title ? { title: opts.title } : {}),
+          ...(files.length > 0 ? { files } : {}),
+          visibility,
+          ...(expiresIn ? { expiresIn } : {}),
+          ...(json ? {} : {
+            onProgress: (progress) => {
+              const pct = progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0;
+              process.stderr.write(`\rUploading ${pct}% (${progress.itemIndex + 1}/${progress.itemCount})`);
+            },
+          }),
+        });
+        if (!json) process.stderr.write("\n");
+        if (json) {
+          console.log(JSON.stringify(share, null, 2));
+        } else {
+          console.log("✓ Share created:");
+          printShare(share);
         }
         break;
       }

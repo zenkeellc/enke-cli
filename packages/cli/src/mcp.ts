@@ -1,7 +1,7 @@
 /**
  * enke MCP Server (merged into enke-cli)
  *
- * Exposes en.ke link + doc + mem tools to AI agents via the Model Context Protocol.
+ * Exposes en.ke link + doc + mem + share tools to AI agents via the Model Context Protocol.
  * Run via: enke mcp
  *
  * Transport modes:
@@ -11,7 +11,7 @@
 
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-const pkg = require("../../package.json") as { version: string };
+const pkg = require("../package.json") as { version: string };
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -24,6 +24,8 @@ import {
   whoami,
   MemClient,
 } from "enke-sdk";
+import { DevicePairing, MemoryQueueStorage } from "@enke/core";
+import { sendShare, createShareClient } from "./share.js";
 import http from "node:http";
 
 // ── Helpers ──
@@ -162,6 +164,23 @@ const DocSearchSchema = z.object({
   limit: z.number().min(1).max(100).default(10).describe("Max results"),
 });
 
+// ── Share Schemas ──
+
+const ShareSendSchema = z.object({
+  text: z.string().optional().describe("Text to share"),
+  url: z.string().url().optional().describe("URL to share"),
+  title: z.string().optional().describe("Share title"),
+  files: z.array(z.string()).optional().describe("Absolute file paths to attach"),
+  visibility: z.enum(["link", "private"]).default("link").describe("link = anyone with URL, private = only you"),
+  expires_in: z.number().min(300).max(2592000).optional().describe("Expiry in seconds (5 min - 30 days)"),
+});
+
+const DevicePairStartSchema = z.object({
+  name: z.string().default("enke CLI").describe("Device display name"),
+  model: z.string().optional().describe("Device model"),
+  firmware: z.string().optional().describe("Firmware version"),
+});
+
 // ── Server Setup ──
 
 function createServer(): McpServer {
@@ -297,6 +316,54 @@ function createServer(): McpServer {
     wrapTool(async (input: z.infer<typeof DocIdSchema>) => {
       const doc = await renewDoc(input.slug);
       return { content: [{ type: "text" as const, text: `Renewed: ${doc.slug} (${doc.exp_days} days)` }] };
+    }),
+  );
+
+  // ── Share Tools ──
+
+  server.tool("share_send",
+    "Share text, a URL, or files to enke. Returns a share URL that can be opened on any device.",
+    ShareSendSchema.shape,
+    wrapTool(async (input: z.infer<typeof ShareSendSchema>) => {
+      const share = await sendShare({
+        version: pkg.version,
+        ...(input.text ? { text: input.text } : {}),
+        ...(input.url ? { url: input.url } : {}),
+        ...(input.title ? { title: input.title } : {}),
+        ...(input.files && input.files.length > 0 ? { files: input.files } : {}),
+        visibility: input.visibility,
+        ...(input.expires_in ? { expiresIn: input.expires_in } : {}),
+      });
+      return { content: [{ type: "text", text: JSON.stringify(share, null, 2) }] };
+    }),
+  );
+
+  server.tool("devices_list",
+    "List devices paired to the current enke account (phones, e-ink screens, ESP32, desktop apps).",
+    {},
+    wrapTool(async () => {
+      const client = createShareClient(pkg.version);
+      const response = await client.api.listDevices();
+      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  server.tool("device_pair_start",
+    "Start pairing a new device. Returns a short code and claim URL; confirm it on enke to finish pairing.",
+    DevicePairStartSchema.shape,
+    wrapTool(async (input: z.infer<typeof DevicePairStartSchema>) => {
+      const client = createShareClient(pkg.version);
+      const pairing = new DevicePairing(client.api, {
+        config: {
+          name: input.name,
+          platform: "cli",
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.firmware ? { firmware: input.firmware } : {}),
+        },
+        storage: new MemoryQueueStorage(),
+      });
+      const session = await pairing.start();
+      return { content: [{ type: "text", text: JSON.stringify(session, null, 2) }] };
     }),
   );
 

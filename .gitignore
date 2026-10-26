@@ -141,3 +141,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# internal enke-share tarballs (not npm-published)
+!vendor/
+!vendor/*.tgz
