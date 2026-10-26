@@ -49,7 +49,7 @@ enke mem recall "Derek"
 | `enke login` | Authenticate via browser |
 | `enke link` | Create, list, update, delete short links |
 | `enke doc` | Upload, share, manage documents |
-| `enke share` | Share text / URL / files, list paired devices |
+| `enke share` | Share text / URL / files (docs/links), list devices, start pairing |
 | `enke mem` | AI agent memory (remember/recall/forget) |
 | `enke mcp` | Start MCP server (stdio or SSE) |
 | `enke whoami` | Show account info |
@@ -59,21 +59,25 @@ enke mem recall "Derek"
 ```bash
 enke share send "hello" --title "Note"
 enke share send --url https://example.com --expires 7d
-enke share send --files ./report.pdf --visibility link
+enke share send --files ./report.pdf
 enke share send --chat ./WhatsApp\ Chat.txt
 enke share devices --json
+enke share pair --name "Desk e-ink"
 ```
 
-默认直接复用 en.ke 现有线上 API，不依赖 `share.en.ke`：
+始终复用 en.ke 现有线上 API（`https://api.en.ke/api/v1`），没有独立 Share Worker，
+也没有第二个 API base：
 
-- URL → `POST https://api.en.ke/api/v1/links`，得到 `https://en.ke/{slug}`
-- 文本 / 聊天导出 / 文件 → `POST https://api.en.ke/api/v1/docs`，得到 `https://en.ke/{slug}`
-- 多文件、任意二进制或“文件+文字/链接”混合 → 自动打成一个 zip 再上传（服务端接受 `application/zip`）
+- URL → `POST /api/v1/links`，得到 `https://en.ke/{slug}`
+- 文本 / 聊天导出 / 文件 → `POST /api/v1/docs`，得到 `https://en.ke/{slug}`
+- 多文件、任意二进制或“文件+文字/链接”混合 → 自动打成一个 store-only zip 再上传（服务端接受 `application/zip`）
 
-完整的设备收件箱 / 实时 / ESP32 功能需要单独部署 `enke-share` worker，并显式设置
-`ENKE_SHARE_API_URL=https://<your-worker>/v1`。不设置时不会访问任何不存在的域名。
+设备（`enke share devices` / `enke share pair`）使用 enkeworker 的设备端点：
 
-`@enke/core` 仅用于聊天解析和可选的 worker 模式。该包不发布 npm：`vendor/`
+- `GET /api/v1/devices` 列出已配对设备
+- `POST /api/v1/devices/pair/start` 生成 8 位配对码（5 分钟有效），在设备端输入完成配对
+
+`@enke/core` 仅用于聊天解析和 store-only zip 生成。该包不发布 npm：`vendor/`
 tarball 在构建期由 esbuild 内联到 `dist/enke.js`。刷新：
 
 ```bash
@@ -88,8 +92,6 @@ ENKE_SHARE_DIR=/path/to/enke-share ./scripts/sync-enke-core.sh
 | `ENKE_MCP_TRANSPORT` | `stdio` (default) or `sse` |
 | `ENKE_MCP_PORT` | SSE port (default: 3100) |
 | `ENKE_API_KEY` | API key for remote/CI mode |
-| `ENKE_SHARE_API_URL` | Optional enke-share worker base, e.g. `https://your-worker/v1`; unset = use `api.en.ke` |
-| `ENKE_SHARE_PAGE_URL` | Optional worker share page base |
 
 ## License
 

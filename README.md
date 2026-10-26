@@ -45,9 +45,10 @@ enke link create https://example.com --keep-days 7
 | `enke doc renew <slug>` | Reset document expiration |
 | `enke doc expire <slug> <days>` | Set document expiration days |
 | `enke doc delete <slug>` | Delete a shared document |
-| `enke share send [text]` | Share text / URL / files via `api.en.ke` (no fake domain) |
-| `enke share url <url>` | Share a URL |
-| `enke share devices` | List devices (requires deployed enke-share worker) |
+| `enke share send [text]` | Share text / URL / files via `api.en.ke` docs/links |
+| `enke share url <url>` | Share a URL as a short link |
+| `enke share devices [--json]` | List devices paired to your account |
+| `enke share pair [--name n]` | Generate an 8-character device pairing code |
 
 ### Landing Pages
 

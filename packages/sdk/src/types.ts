@@ -259,3 +259,23 @@ export interface DocListResponse {
   cursor: string;
   docs: DocShare[];
 }
+
+// ── Devices (enkeworker /api/v1/devices) ──
+
+/** A device paired to the en.ke account — matches GET /api/v1/devices. */
+export interface DeviceInfo {
+  id: string;
+  name: string;
+  platform: string;
+  capabilities?: unknown;
+  created_at: number;
+  last_seen_at?: number | null;
+}
+
+/** Device pairing code — matches POST /api/v1/devices/pair/start. */
+export interface PairStartResult {
+  /** 8-character uppercase code, valid for 5 minutes. */
+  code: string;
+  /** Unix timestamp in milliseconds. */
+  expires_at: number;
+}

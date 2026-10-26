@@ -4,6 +4,7 @@ export type {
   LinkStats, LandingPage, LandingOptions, UserInfo, AuthConfig,
   DocShare, DocUploadOptions, DocUpdateOptions, DocListResponse,
   WatermarkSettings,
+  DeviceInfo, PairStartResult,
 } from "./types.js";
 
 // Mem types
@@ -23,6 +24,7 @@ export {
   shorten, listLinks, getLink, deleteLink, updateLink, getLinkStats,
   createLanding, whoami, EnkeError,
   uploadDoc, listDocs, getDoc, deleteDoc, updateDoc, renewDoc, editDocExpiration,
+  listDevices, deleteDevice, startDevicePair,
 } from "./client.js";
 
 // Mem Client

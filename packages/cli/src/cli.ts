@@ -8,10 +8,10 @@ import {
   login, logout, loadConfig, getToken, clearConfig,
   shorten, listLinks, getLink, deleteLink, updateLink, getLinkStats,
   createLanding, whoami, EnkeError,
+  listDevices, startDevicePair,
   MemClient, MemApiError,
 } from "enke-sdk";
-import { EnkeShareError } from "@enke/core";
-import { sendShare, sharePageUrl, createShareClient, type ShareResult } from "./share.js";
+import { sendShare, sharePageUrl, type ShareResult } from "./share.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { name: string; version: string };
@@ -45,20 +45,7 @@ function safePreview(text: string, maxLen = 120): string {
 
 /** Print a structured error, surfacing errorCode and params for scripting. */
 function printError(err: unknown, asJson: boolean): void {
-  if (err instanceof EnkeShareError) {
-    if (asJson) {
-      console.log(JSON.stringify({
-        error: true,
-        message: err.message,
-        code: err.code,
-        status: err.status,
-        retryable: err.retryable,
-      }, null, 2));
-    } else {
-      console.error(`Error (${err.status || "share"}) [${err.code}]: ${err.message}`);
-      if (err.code === "unauthorized") console.error("Run 'enke login' to authenticate.");
-    }
-  } else if (err instanceof EnkeError) {
+  if (err instanceof EnkeError) {
     if (asJson) {
       console.log(JSON.stringify({
         error: true,
@@ -121,9 +108,10 @@ Usage:
   enke doc renew <slug>               Reset document expiration
   enke doc expire <slug> <days>       Set document expiration days
 
-  enke share send [text] [opts]       Share text / URL / files / chat export
-  enke share url <url> [opts]         Share a URL
+  enke share send [text] [opts]       Share text / URL / files / chat export (docs/links)
+  enke share url <url> [opts]         Share a URL (short link)
   enke share devices                  List paired devices
+  enke share pair                     Start device pairing (prints a code)
 
   enke mem remember <content>         Store a memory for the AI agent
   enke mem recall <query>             Search memories & documents
@@ -165,8 +153,11 @@ Options (share send):
   --title <text>      Share title
   --files a,b         Comma-separated file paths
   --chat <file>       Chat export (.txt/.json: WhatsApp/Telegram/WeChat/QQ/X/Facebook)
-  --visibility link   link (default) or private (worker only)
   --expires 7d        Expiry: 30m / 24h / 7d / 3600
+
+Options (share pair):
+  --name <text>       Device display name (default: "enke CLI")
+  --platform <name>   Device platform (default: cli)
 
 Shell completion:
   enke completion bash    Output bash completion script
@@ -183,6 +174,7 @@ Examples:
   enke share send --files ./a.pdf,./b.png
   enke share send --chat ./WhatsApp\ Chat.txt
   enke share devices --json
+  enke share pair --name "Desk e-ink"
   enke token info --json
 `);
 }
@@ -293,7 +285,7 @@ function generateCompletion(shell: "bash" | "zsh"): string {
   const LINK_SUBS = ["create", "get", "list", "stats", "delete", "update"];
   const DOC_SUBS = ["upload", "list", "get", "delete", "update", "renew", "expire"];
   const MEM_SUBS = ["remember", "recall", "forget", "list", "stats", "session", "doc"];
-  const SHARE_SUBS = ["send", "url", "devices"];
+  const SHARE_SUBS = ["send", "url", "devices", "pair"];
   const ALL = [...TOP_CMDS, ...LINK_SUBS.map(s => `link_${s}`), ...DOC_SUBS.map(s => `doc_${s}`), ...MEM_SUBS.map(s => `mem_${s}`), "landing_create", "help"];
 
   if (shell === "bash") {
@@ -1066,33 +1058,52 @@ async function main(): Promise<void> {
       case "share": {
         const sub = args[1];
         if (!sub || sub === "help") {
-          console.error("Usage: enke share <send|url|devices> [...]");
-          console.error("  enke share send [text] [--url u] [--files a,b] [--title t] [--visibility link|private] [--expires 7d]");
+          console.error("Usage: enke share <send|url|devices|pair> [...]");
+          console.error("  enke share send [text] [--url u] [--files a,b] [--title t] [--expires 7d]");
           console.error("  enke share url <url> [opts]");
           console.error("  enke share devices [--json]");
+          console.error("  enke share pair [--name n] [--platform p] [--json]");
           process.exit(1);
         }
 
         if (sub === "devices") {
-          const client = createShareClient();
-          const response = await client.api.listDevices();
+          const devices = await listDevices();
           if (json) {
-            console.log(JSON.stringify(response, null, 2));
-          } else if (response.devices.length === 0) {
+            console.log(JSON.stringify({ devices }, null, 2));
+          } else if (devices.length === 0) {
             console.log("No paired devices.");
+            console.log("Run 'enke share pair' to add a device (e-ink screen, ESP32, phone, desktop).");
           } else {
-            console.log(`Devices (${response.devices.length}):\n`);
-            for (const device of response.devices) {
-              const online = device.online === undefined ? "" : device.online ? " online" : " offline";
-              console.log(`  ${device.id}  ${device.name}  [${device.platform}${online}]`);
+            console.log(`Devices (${devices.length}):\n`);
+            for (const device of devices) {
+              const seen = device.last_seen_at
+                ? `last seen ${new Date(device.last_seen_at).toISOString()}`
+                : "never seen";
+              console.log(`  ${device.id}  ${device.name}  [${device.platform}]  ${seen}`);
             }
+          }
+          break;
+        }
+
+        if (sub === "pair") {
+          const pairing = await startDevicePair({
+            name: opts.name ?? "enke CLI",
+            platform: opts.platform ?? "cli",
+          });
+          if (json) {
+            console.log(JSON.stringify(pairing, null, 2));
+          } else {
+            console.log("✓ Pairing code:");
+            console.log(`  Code:     ${pairing.code}`);
+            console.log(`  Expires:  ${new Date(pairing.expires_at).toISOString()} (5 minutes)`);
+            console.log("\nEnter this code on the device to finish pairing.");
           }
           break;
         }
 
         if (sub !== "send" && sub !== "url") {
           console.error(`Unknown share sub-command: ${sub}`);
-          console.error("Usage: enke share <send|url|devices>");
+          console.error("Usage: enke share <send|url|devices|pair>");
           process.exit(1);
         }
 
@@ -1104,7 +1115,6 @@ async function main(): Promise<void> {
           console.error("Nothing to share. Pass text, --url, or --files.");
           process.exit(1);
         }
-        const visibility = opts.visibility === "private" ? "private" : "link";
         const expiresIn = parseExpires(opts.expires);
         const share = await sendShare({
           ...(text ? { text } : {}),
@@ -1112,7 +1122,6 @@ async function main(): Promise<void> {
           ...(opts.title ? { title: opts.title } : {}),
           ...(files.length > 0 ? { files } : {}),
           ...(chatFile ? { chatFile } : {}),
-          visibility,
           ...(expiresIn ? { expiresIn } : {}),
           ...(json ? {} : {
             onProgress: (percent) => {

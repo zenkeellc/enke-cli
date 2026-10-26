@@ -170,12 +170,12 @@ describe("command routing", () => {
   });
 
   it("share send: files/url options", () => {
-    const opts = parseArgs(["node", "enke", "share", "send", "--url", "https://example.com", "--files", "a.pdf,b.png", "--visibility", "private"]);
-    const pos = getPositionalArgs(["node", "enke", "share", "send", "--url", "https://example.com", "--files", "a.pdf,b.png", "--visibility", "private"]);
+    const opts = parseArgs(["node", "enke", "share", "send", "--url", "https://example.com", "--files", "a.pdf,b.png", "--title", "Report"]);
+    const pos = getPositionalArgs(["node", "enke", "share", "send", "--url", "https://example.com", "--files", "a.pdf,b.png", "--title", "Report"]);
     expect(pos).toEqual(["share", "send"]);
     expect(opts.url).toBe("https://example.com");
     expect(opts.files).toBe("a.pdf,b.png");
-    expect(opts.visibility).toBe("private");
+    expect(opts.title).toBe("Report");
   });
 
   it("share url", () => {
@@ -189,6 +189,23 @@ describe("command routing", () => {
     const pos = getPositionalArgs(["node", "enke", "share", "devices", "--json"]);
     const opts = parseArgs(["node", "enke", "share", "devices", "--json"]);
     expect(pos).toEqual(["share", "devices"]);
+    expect(opts.json).toBe("true");
+  });
+
+  it("share pair: defaults", () => {
+    const pos = getPositionalArgs(["node", "enke", "share", "pair"]);
+    const opts = parseArgs(["node", "enke", "share", "pair"]);
+    expect(pos).toEqual(["share", "pair"]);
+    expect(opts.name).toBeUndefined();
+    expect(opts.platform).toBeUndefined();
+  });
+
+  it("share pair: name/platform options", () => {
+    const pos = getPositionalArgs(["node", "enke", "share", "pair", "--name", "Desk e-ink", "--platform", "esp32", "--json"]);
+    const opts = parseArgs(["node", "enke", "share", "pair", "--name", "Desk e-ink", "--platform", "esp32", "--json"]);
+    expect(pos).toEqual(["share", "pair"]);
+    expect(opts.name).toBe("Desk e-ink");
+    expect(opts.platform).toBe("esp32");
     expect(opts.json).toBe("true");
   });
 

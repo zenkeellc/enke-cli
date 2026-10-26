@@ -1,7 +1,7 @@
 {
   "name": "enke-sdk",
   "version": "1.5.5",
-  "description": "Shared SDK for en.ke CLI and MCP Server — auth, API client, types",
+  "description": "Shared SDK for en.ke CLI and MCP Server \u2014 auth, API client, types",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,7 +11,8 @@
   "scripts": {
     "build": "tsc",
     "type-check": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "vitest run"
   },
   "dependencies": {
     "mime": "^4.1.0",

@@ -3,6 +3,7 @@ import type {
   ShortLink, ShortenOptions, UpdateOptions, ListFilter, LinkListResponse,
   LinkStats, LandingPage, LandingOptions, UserInfo,
   DocShare, DocUploadOptions, DocUpdateOptions, DocListResponse,
+  DeviceInfo, PairStartResult,
 } from "./types.js";
 
 class EnkeError extends Error {
@@ -285,6 +286,38 @@ export async function editDocExpiration(slug: string, expDays: number): Promise<
     { exp_days: expDays },
   );
   return data.result.doc;
+}
+
+// ── Devices ──
+
+/** List devices paired to the account (GET /api/v1/devices). */
+export async function listDevices(): Promise<DeviceInfo[]> {
+  const data = await request<{ success: boolean; result: { devices: DeviceInfo[] } }>(
+    "GET", "/api/v1/devices",
+  );
+  return data.result?.devices ?? [];
+}
+
+/** Revoke/delete a paired device (DELETE /api/v1/devices/:id). */
+export async function deleteDevice(id: string): Promise<void> {
+  await request<unknown>("DELETE", `/api/v1/devices/${encodeURIComponent(id)}`);
+}
+
+/**
+ * Start device pairing (POST /api/v1/devices/pair/start). Returns an
+ * 8-character code valid for 5 minutes; enter it on the device to claim.
+ */
+export async function startDevicePair(
+  opts?: { name?: string; platform?: string },
+): Promise<PairStartResult> {
+  const data = await request<{ success: boolean; result: PairStartResult }>(
+    "POST", "/api/v1/devices/pair/start",
+    {
+      ...(opts?.name ? { name: opts.name } : {}),
+      ...(opts?.platform ? { platform: opts.platform } : {}),
+    },
+  );
+  return data.result;
 }
 
 export { EnkeError };

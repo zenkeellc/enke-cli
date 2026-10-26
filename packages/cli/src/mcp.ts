@@ -21,11 +21,10 @@ import {
   shorten, listLinks, deleteLink, updateLink, getLinkStats,
   createLanding, getToken, EnkeError,
   uploadDoc, listDocs, getDoc, deleteDoc, updateDoc, renewDoc,
-  whoami,
+  whoami, listDevices, startDevicePair,
   MemClient,
 } from "enke-sdk";
-import { DevicePairing, MemoryQueueStorage } from "@enke/core";
-import { sendShare, createShareClient } from "./share.js";
+import { sendShare } from "./share.js";
 import http from "node:http";
 
 // ── Helpers ──
@@ -170,16 +169,14 @@ const ShareSendSchema = z.object({
   text: z.string().optional().describe("Text to share"),
   url: z.string().url().optional().describe("URL to share"),
   title: z.string().optional().describe("Share title"),
-  files: z.array(z.string()).optional().describe("Absolute file paths to attach"),
+  files: z.array(z.string()).optional().describe("Absolute file paths to attach (multiple files are zipped)"),
   chat_export: z.string().optional().describe("Absolute path to a chat export (.txt/.json: WhatsApp/Telegram/WeChat/QQ/X/Facebook)"),
-  visibility: z.enum(["link", "private"]).default("link").describe("link = anyone with URL; private requires a deployed enke-share worker"),
   expires_in: z.number().min(300).max(2592000).optional().describe("Expiry in seconds (5 min - 30 days)"),
 });
 
 const DevicePairStartSchema = z.object({
   name: z.string().default("enke CLI").describe("Device display name"),
-  model: z.string().optional().describe("Device model"),
-  firmware: z.string().optional().describe("Firmware version"),
+  platform: z.string().default("cli").describe("Device platform (esp32, web, macos, ios, android, windows, linux, cli)"),
 });
 
 // ── Server Setup ──
@@ -323,7 +320,7 @@ function createServer(): McpServer {
   // ── Share Tools ──
 
   server.tool("share_send",
-    "Share text, a URL, or files to enke. Returns a share URL that can be opened on any device.",
+    "Share text, a URL, or files to enke. URL-only shares become a short link; text/files/chat become a document share. Returns a https://en.ke/{slug} URL that opens on any device.",
     ShareSendSchema.shape,
     wrapTool(async (input: z.infer<typeof ShareSendSchema>) => {
       const share = await sendShare({
@@ -332,7 +329,6 @@ function createServer(): McpServer {
         ...(input.title ? { title: input.title } : {}),
         ...(input.files && input.files.length > 0 ? { files: input.files } : {}),
         ...(input.chat_export ? { chatFile: input.chat_export } : {}),
-        visibility: input.visibility,
         ...(input.expires_in ? { expiresIn: input.expires_in } : {}),
       });
       return { content: [{ type: "text", text: JSON.stringify(share, null, 2) }] };
@@ -340,31 +336,23 @@ function createServer(): McpServer {
   );
 
   server.tool("devices_list",
-    "List devices paired to the current enke account (phones, e-ink screens, ESP32, desktop apps).",
+    "List devices paired to the current enke account (e-ink screens, ESP32, phones, desktop apps) via GET /api/v1/devices.",
     {},
     wrapTool(async () => {
-      const client = createShareClient();
-      const response = await client.api.listDevices();
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      const devices = await listDevices();
+      return { content: [{ type: "text", text: JSON.stringify({ devices }, null, 2) }] };
     }),
   );
 
   server.tool("device_pair_start",
-    "Start pairing a new device. Returns a short code and claim URL; confirm it on enke to finish pairing.",
+    "Start pairing a new device via POST /api/v1/devices/pair/start. Returns an 8-character code that is valid for 5 minutes; enter it on the device to finish pairing.",
     DevicePairStartSchema.shape,
     wrapTool(async (input: z.infer<typeof DevicePairStartSchema>) => {
-      const client = createShareClient();
-      const pairing = new DevicePairing(client.api, {
-        config: {
-          name: input.name,
-          platform: "cli",
-          ...(input.model ? { model: input.model } : {}),
-          ...(input.firmware ? { firmware: input.firmware } : {}),
-        },
-        storage: new MemoryQueueStorage(),
+      const pairing = await startDevicePair({
+        name: input.name,
+        platform: input.platform,
       });
-      const session = await pairing.start();
-      return { content: [{ type: "text", text: JSON.stringify(session, null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify(pairing, null, 2) }] };
     }),
   );
 
