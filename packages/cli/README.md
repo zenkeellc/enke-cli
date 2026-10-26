@@ -64,10 +64,16 @@ enke share send --chat ./WhatsApp\ Chat.txt
 enke share devices --json
 ```
 
-Share uses the internal `@enke/core` engine from `enke-share`. The package does **not**
-publish `@enke/core` to npm: `vendor/` tarballs are used at build time and esbuild
-inlines them into `dist/enke.js`, so the published `enke-cli` has no extra runtime
-dependency. Refresh them with:
+默认直接复用 en.ke 现有线上 API，不依赖 `share.en.ke`：
+
+- URL → `POST https://api.en.ke/api/v1/links`，得到 `https://en.ke/{slug}`
+- 文本 / 聊天导出 / 单文件 → `POST https://api.en.ke/api/v1/docs`，得到 `https://en.ke/{slug}`
+
+完整的设备收件箱 / 实时 / ESP32 功能需要单独部署 `enke-share` worker，并显式设置
+`ENKE_SHARE_API_URL=https://<your-worker>/v1`。不设置时不会访问任何不存在的域名。
+
+`@enke/core` 仅用于聊天解析和可选的 worker 模式。该包不发布 npm：`vendor/`
+tarball 在构建期由 esbuild 内联到 `dist/enke.js`。刷新：
 
 ```bash
 ./scripts/sync-enke-core.sh          # default ../../enke-share
@@ -81,8 +87,8 @@ ENKE_SHARE_DIR=/path/to/enke-share ./scripts/sync-enke-core.sh
 | `ENKE_MCP_TRANSPORT` | `stdio` (default) or `sse` |
 | `ENKE_MCP_PORT` | SSE port (default: 3100) |
 | `ENKE_API_KEY` | API key for remote/CI mode |
-| `ENKE_SHARE_API_URL` | Override Share API base (default `https://share.en.ke/v1`) |
-| `ENKE_SHARE_PAGE_URL` | Override Share page base (default `https://share.en.ke`) |
+| `ENKE_SHARE_API_URL` | Optional enke-share worker base, e.g. `https://your-worker/v1`; unset = use `api.en.ke` |
+| `ENKE_SHARE_PAGE_URL` | Optional worker share page base |
 
 ## License
 

@@ -327,7 +327,6 @@ function createServer(): McpServer {
     ShareSendSchema.shape,
     wrapTool(async (input: z.infer<typeof ShareSendSchema>) => {
       const share = await sendShare({
-        version: pkg.version,
         ...(input.text ? { text: input.text } : {}),
         ...(input.url ? { url: input.url } : {}),
         ...(input.title ? { title: input.title } : {}),
@@ -344,7 +343,7 @@ function createServer(): McpServer {
     "List devices paired to the current enke account (phones, e-ink screens, ESP32, desktop apps).",
     {},
     wrapTool(async () => {
-      const client = createShareClient(pkg.version);
+      const client = createShareClient();
       const response = await client.api.listDevices();
       return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     }),
@@ -354,7 +353,7 @@ function createServer(): McpServer {
     "Start pairing a new device. Returns a short code and claim URL; confirm it on enke to finish pairing.",
     DevicePairStartSchema.shape,
     wrapTool(async (input: z.infer<typeof DevicePairStartSchema>) => {
-      const client = createShareClient(pkg.version);
+      const client = createShareClient();
       const pairing = new DevicePairing(client.api, {
         config: {
           name: input.name,

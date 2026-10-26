@@ -11,8 +11,7 @@ import {
   MemClient, MemApiError,
 } from "enke-sdk";
 import { EnkeShareError } from "@enke/core";
-import type { ShareRecordV1 } from "@enke/protocol";
-import { sendShare, sharePageUrl, createShareClient } from "./share.js";
+import { sendShare, sharePageUrl, createShareClient, type ShareResult } from "./share.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { name: string; version: string };
@@ -394,14 +393,11 @@ function parseExpires(value: string | undefined): number | undefined {
   return amount * factor;
 }
 
-function printShare(share: ShareRecordV1): void {
-  console.log(`  URL:        ${sharePageUrl(share)}`);
-  console.log(`  ID:         ${share.id}`);
-  console.log(`  Kind:       ${share.kind}`);
-  console.log(`  Visibility: ${share.visibility}`);
-  if (share.title) console.log(`  Title:      ${share.title}`);
-  if (share.items.length > 0) console.log(`  Files:      ${share.items.length}`);
-  if (share.expiresAt) console.log(`  Expires:    ${new Date(share.expiresAt).toISOString()}`);
+function printShare(share: ShareResult): void {
+  console.log(`  URL:   ${sharePageUrl(share)}`);
+  console.log(`  ID:    ${share.id}`);
+  console.log(`  Kind:  ${share.kind}`);
+  if (share.title) console.log(`  Title: ${share.title}`);
   console.log();
 }
 
@@ -1078,7 +1074,7 @@ async function main(): Promise<void> {
         }
 
         if (sub === "devices") {
-          const client = createShareClient(VERSION);
+          const client = createShareClient();
           const response = await client.api.listDevices();
           if (json) {
             console.log(JSON.stringify(response, null, 2));
@@ -1111,7 +1107,6 @@ async function main(): Promise<void> {
         const visibility = opts.visibility === "private" ? "private" : "link";
         const expiresIn = parseExpires(opts.expires);
         const share = await sendShare({
-          version: VERSION,
           ...(text ? { text } : {}),
           ...(url ? { url } : {}),
           ...(opts.title ? { title: opts.title } : {}),
@@ -1120,9 +1115,8 @@ async function main(): Promise<void> {
           visibility,
           ...(expiresIn ? { expiresIn } : {}),
           ...(json ? {} : {
-            onProgress: (progress) => {
-              const pct = progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : 0;
-              process.stderr.write(`\rUploading ${pct}% (${progress.itemIndex + 1}/${progress.itemCount})`);
+            onProgress: (percent) => {
+              process.stderr.write(`\rUploading ${percent}%`);
             },
           }),
         });
