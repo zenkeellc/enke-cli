@@ -55,7 +55,7 @@ export function createShareClient(): EnkeShareClient {
     sharePageBase: process.env.ENKE_SHARE_PAGE_URL ?? 'https://en.ke',
     platform: 'cli',
     appName: 'enke-cli',
-    appVersion: process.env.npm_package_version ?? '1.7.0',
+    appVersion: process.env.npm_package_version ?? '1.8.0',
     tokenProvider: getToken,
     refreshTokenProvider: async () => {
       const token = await getToken();
