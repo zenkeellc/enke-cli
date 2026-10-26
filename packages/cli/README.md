@@ -60,6 +60,7 @@ enke mem recall "Derek"
 enke share send "hello" --title "Note"
 enke share send --url https://example.com --expires 7d
 enke share send --files ./a.pdf,./b.png --visibility private
+enke share send --chat ./WhatsApp\ Chat.txt
 enke share devices --json
 ```
 

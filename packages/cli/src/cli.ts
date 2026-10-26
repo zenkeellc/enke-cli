@@ -122,7 +122,7 @@ Usage:
   enke doc renew <slug>               Reset document expiration
   enke doc expire <slug> <days>       Set document expiration days
 
-  enke share send [text] [opts]       Share text / URL / files to en.ke
+  enke share send [text] [opts]       Share text / URL / files / chat export
   enke share url <url> [opts]         Share a URL
   enke share devices                  List paired devices
 
@@ -165,6 +165,7 @@ Options (share send):
   --url <url>         Also share a link
   --title <text>      Share title
   --files a,b         Comma-separated file paths
+  --chat <file>       Chat export (.txt/.json: WhatsApp/Telegram/WeChat/QQ/X/Facebook)
   --visibility link   link (default) or private
   --expires 7d        Expiry: 30m / 24h / 7d / 3600
 
@@ -181,6 +182,7 @@ Examples:
   enke share send "hello" --title "Note"
   enke share send --url https://example.com --expires 7d
   enke share send --files ./a.pdf,./b.png
+  enke share send --chat ./WhatsApp\ Chat.txt
   enke share devices --json
   enke token info --json
 `);
@@ -1101,7 +1103,8 @@ async function main(): Promise<void> {
         const url = sub === "url" ? args[2] : opts.url;
         const text = sub === "send" ? args.slice(2).join(" ").trim() : "";
         const files = (opts.files ?? "").split(",").map((f) => f.trim()).filter(Boolean);
-        if (!url && !text && files.length === 0) {
+        const chatFile = opts.chat;
+        if (!url && !text && files.length === 0 && !chatFile) {
           console.error("Nothing to share. Pass text, --url, or --files.");
           process.exit(1);
         }
@@ -1113,6 +1116,7 @@ async function main(): Promise<void> {
           ...(url ? { url } : {}),
           ...(opts.title ? { title: opts.title } : {}),
           ...(files.length > 0 ? { files } : {}),
+          ...(chatFile ? { chatFile } : {}),
           visibility,
           ...(expiresIn ? { expiresIn } : {}),
           ...(json ? {} : {

@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
-import { EnkeShareClient, type ShareInput, type UploadProgress } from '@enke/core';
+import { EnkeShareClient, parseChatExport, type ShareInput, type UploadProgress } from '@enke/core';
 import type { ShareRecordV1 } from '@enke/protocol';
 import { getToken } from 'enke-sdk';
 
@@ -10,6 +10,7 @@ export interface SendShareOptions {
   url?: string;
   title?: string;
   files?: string[];
+  chatFile?: string;
   visibility?: 'link' | 'private';
   expiresIn?: number;
   onProgress?: (progress: UploadProgress) => void;
@@ -39,11 +40,19 @@ export async function sendShare(options: SendShareOptions): Promise<ShareRecordV
     items.push({ name: basename(path), data: new Uint8Array(data) });
   }
 
+  let chat: ReturnType<typeof parseChatExport> | undefined;
+  if (options.chatFile) {
+    const path = resolve(options.chatFile);
+    const content = await readFile(path, 'utf8');
+    chat = parseChatExport({ filename: basename(path), content });
+  }
+
   const input: ShareInput = {
     ...(options.title ? { title: options.title } : {}),
     ...(options.text ? { text: options.text } : {}),
     ...(options.url ? { url: options.url } : {}),
     ...(items.length > 0 ? { items } : {}),
+    ...(chat ? { chat: chat.chat } : {}),
     ...(options.visibility ? { visibility: options.visibility } : {}),
     ...(options.expiresIn ? { expiresIn: options.expiresIn } : {}),
   };

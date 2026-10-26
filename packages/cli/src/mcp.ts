@@ -171,6 +171,7 @@ const ShareSendSchema = z.object({
   url: z.string().url().optional().describe("URL to share"),
   title: z.string().optional().describe("Share title"),
   files: z.array(z.string()).optional().describe("Absolute file paths to attach"),
+  chat_export: z.string().optional().describe("Absolute path to a chat export (.txt/.json: WhatsApp/Telegram/WeChat/QQ/X/Facebook)"),
   visibility: z.enum(["link", "private"]).default("link").describe("link = anyone with URL, private = only you"),
   expires_in: z.number().min(300).max(2592000).optional().describe("Expiry in seconds (5 min - 30 days)"),
 });
@@ -331,6 +332,7 @@ function createServer(): McpServer {
         ...(input.url ? { url: input.url } : {}),
         ...(input.title ? { title: input.title } : {}),
         ...(input.files && input.files.length > 0 ? { files: input.files } : {}),
+        ...(input.chat_export ? { chatFile: input.chat_export } : {}),
         visibility: input.visibility,
         ...(input.expires_in ? { expiresIn: input.expires_in } : {}),
       });
