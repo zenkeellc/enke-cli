@@ -35,9 +35,8 @@ npm run build -w packages/sdk
 npm run build -w packages/cli
 
 # Test
-npx vitest run -w packages/sdk
-npx vitest run -w packages/cli
-npx vitest run -w packages/sdk -w packages/cli   # combined
+(cd packages/sdk && npx vitest run)
+(cd packages/cli && npx vitest run)
 ```
 
 ## Architecture
@@ -68,7 +67,7 @@ Key design decisions:
 ### Detailed steps
 
 1. **Pre-flight**: working directory clean, on `main` branch
-2. **Tests**: `npx vitest run -w packages/sdk -w packages/cli`
+2. **Tests**: `(cd packages/sdk && npx vitest run) && (cd packages/cli && npx vitest run)`
 3. **Type-check**: `npm run type-check -w packages/sdk && npm run type-check -w packages/cli`
 4. **Bump**: `npm version <version> --no-git-tag-version` in both sdk and cli
 5. **Build**: `npm run build -w packages/sdk && npm run build -w packages/cli`
