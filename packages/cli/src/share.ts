@@ -50,7 +50,7 @@ function workerBase(): string | null {
 
 /**
  * 只有显式配置 ENKE_SHARE_API_URL 时才走 enke-share worker。
- * 默认使用 en.ke 现有线上 API（api.en.ke），不假设 share.en.ke 已部署。
+ * 默认使用 en.ke 现有线上 API（api.en.ke），不假设未部署的占位域名。
  */
 export function createShareClient(): EnkeShareClient {
   const base = workerBase();
