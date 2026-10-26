@@ -172,7 +172,7 @@ const ShareSendSchema = z.object({
   title: z.string().optional().describe("Share title"),
   files: z.array(z.string()).optional().describe("Absolute file paths to attach"),
   chat_export: z.string().optional().describe("Absolute path to a chat export (.txt/.json: WhatsApp/Telegram/WeChat/QQ/X/Facebook)"),
-  visibility: z.enum(["link", "private"]).default("link").describe("link = anyone with URL, private = only you"),
+  visibility: z.enum(["link", "private"]).default("link").describe("link = anyone with URL; private requires a deployed enke-share worker"),
   expires_in: z.number().min(300).max(2592000).optional().describe("Expiry in seconds (5 min - 30 days)"),
 });
 

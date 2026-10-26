@@ -165,7 +165,7 @@ Options (share send):
   --title <text>      Share title
   --files a,b         Comma-separated file paths
   --chat <file>       Chat export (.txt/.json: WhatsApp/Telegram/WeChat/QQ/X/Facebook)
-  --visibility link   link (default) or private
+  --visibility link   link (default) or private (worker only)
   --expires 7d        Expiry: 30m / 24h / 7d / 3600
 
 Shell completion:
