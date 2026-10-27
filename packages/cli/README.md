@@ -23,8 +23,8 @@ enke link create https://example.com --keep-days 30
 enke link list
 
 # AI agent memory
-enke mem remember "用户叫Derek，喜欢Rust和TypeScript"
-enke mem recall "Derek"
+enke mem remember "用户叫example-user，喜欢Rust和TypeScript"
+enke mem recall "example-user"
 ```
 
 ## MCP Server (Claude Desktop)

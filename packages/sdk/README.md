@@ -19,8 +19,8 @@ const { results } = await listLinks({ uid: 'xxx' });
 
 // Agent memory
 const mem = new MemClient();
-await mem.remember({ content: '用户叫Derek' });
-const results = await mem.recall('Derek');
+await mem.remember({ content: '用户叫example-user' });
+const results = await mem.recall('example-user');
 ```
 
 ## Modules

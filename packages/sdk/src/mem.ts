@@ -7,7 +7,7 @@
  * Usage:
  *   import { MemClient } from 'enke-sdk';
  *   const mem = new MemClient();
- *   await mem.remember({ content: "用户叫Derek" });
+ *   await mem.remember({ content: "用户叫example-user" });
  */
 
 import { getToken, loadConfig } from './auth.js';

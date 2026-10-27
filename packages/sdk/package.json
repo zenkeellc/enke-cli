@@ -26,7 +26,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git@github-zenkee:zenkeellc/enke-cli.git",
+    "url": "https://github.com/zenkeellc/enke-cli.git",
     "directory": "packages/sdk"
   },
   "keywords": [
