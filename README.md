@@ -125,6 +125,19 @@ enke doc list --all
 enke link stats my-brand --json
 ```
 
+## Token 刷新（SDK 行为）
+
+登录态存在 `~/.config/enke/config.json`（0600，可用 `XDG_CONFIG_HOME` 改目录），access token TTL 24 小时。
+`getToken()` 在过期或剩余 <60s 时用 refresh token 续期，走 jwtsvr：
+
+- 请求 `POST {userApiUrl}/api/v1/refresh`，body **`{"refresh_token": "..."}`**（snake_case）；
+- 成功 `{ data: { token, refresh_token } }`，**没有 `expires_in`** —— 过期时间从 JWT `exp` 读；
+- 401/403（refresh token 失效或命中 reuse detection）才清配置；网络错误/5xx 保留配置下次重试；
+- 刷新是 single-flight：并发提交同一枚 refresh token 会被服务端判盗用，把该账号所有会话失效。
+
+> 2026-10-28 修复：这里之前发 `{refreshToken}`、只读 `data.refreshToken`，服务端按 snake_case
+> 反序列化后回 `400 Refresh token is required` —— 刷新从来没成功过，用户只看到「登录忽然失效」。
+
 ## Packages
 
 | Package | Description |

@@ -167,109 +167,84 @@ export async function login(): Promise<AuthConfig> {
   });
 }
 
-/** Return the current token, refreshing if needed. Returns null if not logged in. */
+/**
+ * 真正去 jwtsvr 换新 token 并落盘。
+ *
+ * 契约以服务端为准（jwtsvr `models/RefreshTokenRequest.go` / `RefreshTokenRes.go`）：
+ * - 请求 body 是 **`{ refresh_token }`**（snake_case）。写成 `refreshToken` 时服务端取不到字段，
+ *   回 `400 Refresh token is required` —— 刷新**永远失败**，用户只会看到「登录忽然失效」。
+ *   2026-10-28 在桌面端/扩展里查到同一类错误，这里一并修。
+ * - 成功响应是 **`{ data: { token, refresh_token } }`**，且**没有 `expires_in`**：
+ *   过期时间从 access token 的 JWT `exp` 推导（`decodeJwtExp`）。
+ */
+async function performRefresh(): Promise<string | null> {
+  const cfg = loadConfig();
+  if (!cfg) return null;
+  try {
+    const res = await fetch(`${cfg.userApiUrl}/api/v1/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: cfg.refreshToken }),
+    });
+
+    if (!res.ok) {
+      // 只有 401/403（refresh token 失效，或命中 reuse detection）才清登录态；
+      // 网络错误 / 5xx 保留配置，下次还能重试——不能因为一次抖动就把用户登出。
+      if (res.status === 401 || res.status === 403) clearConfig();
+      return null;
+    }
+
+    const data = await res.json() as {
+      data?: { token?: string; refresh_token?: string; refreshToken?: string };
+    };
+    const newToken = data.data?.token;
+    if (!newToken) {
+      clearConfig();
+      return null;
+    }
+    // 服务端没回新的 refresh token 时保留旧的，否则下一次刷新就没凭据了。
+    const newRefresh = data.data?.refresh_token ?? data.data?.refreshToken ?? cfg.refreshToken;
+
+    const newCfg: AuthConfig = {
+      ...cfg,
+      token: newToken,
+      refreshToken: newRefresh,
+      expiresAt: decodeJwtExp(newToken),
+    };
+    saveConfig(newCfg);
+    return newToken;
+  } catch {
+    // 网络错误 / 解析失败：保留配置，返回 null 让调用方提示「刷新失败」。
+    return null;
+  }
+}
+
+/**
+ * Return the current token, refreshing if needed. Returns null if not logged in.
+ *
+ * 刷新走 single-flight（`refreshLock`）：jwtsvr 的 refresh token 有 rotation + reuse detection，
+ * 同一枚 token 被并发提交两次会被判盗用，把该账号所有会话都失效。
+ */
 export async function getToken(): Promise<string | null> {
   const cfg = loadConfig();
   if (!cfg) return null;
 
-  const nowSec = Math.floor(Date.now() / 1000);
-  const ttl = cfg.expiresAt - nowSec;
-
+  const ttl = cfg.expiresAt - Math.floor(Date.now() / 1000);
   // Token still valid (with 60s buffer)
-  if (ttl > 60) {
-    return cfg.token;
-  }
+  if (ttl > 60) return cfg.token;
 
-  // Token expired or about to expire — try refresh
-  if (ttl <= 0) {
-    // Don't clear config yet — try refresh first
-    if (refreshLock) return refreshLock;
-
-    refreshLock = (async () => {
-      try {
-        const latestCfg = loadConfig();
-        if (!latestCfg) return null;
-
-        const res = await fetch(`${latestCfg.userApiUrl}/api/v1/refresh`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refreshToken: latestCfg.refreshToken }),
-        });
-
-        if (!res.ok) {
-          // Only clear on 401 (refresh token invalid/revoked)
-          // Network errors or 5xx: keep config so user can retry
-          if (res.status === 401 || res.status === 403) {
-            clearConfig();
-          }
-          return null;
-        }
-        const data = await res.json() as { data?: { token?: string; refreshToken?: string } };
-        const newToken = data.data?.token;
-        const newRefresh = data.data?.refreshToken;
-        if (!newToken || !newRefresh) {
-          clearConfig();
-          return null;
-        }
-
-        const expiresAt = decodeJwtExp(newToken);
-        const newCfg: AuthConfig = { ...latestCfg, token: newToken, refreshToken: newRefresh, expiresAt };
-        saveConfig(newCfg);
-        return newToken;
-      } catch {
-        // Network error: keep config, return null so caller shows clear error
-        return null;
-      } finally {
-        refreshLock = null;
-      }
-    })();
-
-    return refreshLock;
-  }
-
-  // Token expires within 60s — use in-memory lock to prevent concurrent refresh
   if (refreshLock) return refreshLock;
-
   refreshLock = (async () => {
     try {
-      const latestCfg = loadConfig();
-      if (!latestCfg) return null;
-
-      // Re-check: maybe another refresh already fixed it
-      if (latestCfg.expiresAt > Math.floor(Date.now() / 1000) + 60) {
-        return latestCfg.token;
-      }
-
-      const res = await fetch(`${latestCfg.userApiUrl}/api/v1/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken: latestCfg.refreshToken }),
-      });
-
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) clearConfig();
-        return null;
-      }
-      const data = await res.json() as { data?: { token?: string; refreshToken?: string } };
-      const newToken = data.data?.token;
-      const newRefresh = data.data?.refreshToken;
-      if (!newToken || !newRefresh) {
-        clearConfig();
-        return null;
-      }
-
-      const expiresAt = decodeJwtExp(newToken);
-      const newCfg: AuthConfig = { ...latestCfg, token: newToken, refreshToken: newRefresh, expiresAt };
-      saveConfig(newCfg);
-      return newToken;
-    } catch {
-      const cfg = loadConfig();
-      return cfg?.token ?? null;
+      const latest = loadConfig();
+      if (!latest) return null;
+      // 另一处刷新可能刚完成：避免拿已经轮换掉的 refresh token 再刷一次。
+      if (latest.expiresAt > Math.floor(Date.now() / 1000) + 60) return latest.token;
+      return await performRefresh();
     } finally {
       refreshLock = null;
     }
   })();
-
   return refreshLock;
 }
 
