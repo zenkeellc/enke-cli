@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { realpathSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, delimiter } from "node:path";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
 import {
@@ -374,6 +374,62 @@ async function checkLatestVersion(): Promise<string | null> {
   }
 }
 
+/** Absolute path of the CLI entry point actually executing (symlinks resolved). */
+function currentBinaryPath(): string {
+  const argv1 = process.argv[1];
+  if (!argv1) return "<unknown>";
+  try {
+    return realpathSync(argv1);
+  } catch {
+    return argv1;
+  }
+}
+
+/** Every `enke` executable reachable via PATH, deduped by real path, in resolution order. */
+function enkeInstallationsOnPath(): string[] {
+  const exts = process.platform === "win32" ? [".cmd", ".exe", ".bat", ".ps1", ""] : [""];
+  const found: string[] = [];
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      const candidate = join(dir, `enke${ext}`);
+      if (!existsSync(candidate)) continue;
+      let real = candidate;
+      try {
+        real = realpathSync(candidate);
+      } catch {
+        // keep the unresolved path if the symlink is broken
+      }
+      if (!found.includes(real)) found.push(real);
+      break;
+    }
+  }
+  return found;
+}
+
+/**
+ * Explain which install is running, and warn when several compete on PATH.
+ * `npm install -g` only touches the npm that is first on PATH, so a stale or
+ * shadowed install is the usual reason "the update did not take effect".
+ */
+function printInstallDiagnostics(force: boolean): void {
+  const installations = enkeInstallationsOnPath();
+  if (!force && installations.length <= 1) return;
+
+  console.log(`  binary: ${currentBinaryPath()}`);
+  console.log(`  node:   ${process.version} (${process.execPath})`);
+  if (installations.length <= 1) return;
+
+  console.log("");
+  console.log(`⚠ Found ${installations.length} enke installations on PATH:`);
+  installations.forEach((p, i) => {
+    console.log(`    ${i === 0 ? "→" : " "} ${p}${i === 0 ? "  (first on PATH — this is the one that runs)" : ""}`);
+  });
+  console.log("  `npm install -g enke-cli` updates the global prefix of the npm first on PATH,");
+  console.log("  which must belong to the same Node install as the `enke` you actually run.");
+  console.log("  Otherwise the version never changes — fix PATH or uninstall the stale copies.");
+}
+
 function parseExpires(value: string | undefined): number | undefined {
   if (!value) return undefined;
   if (/^\d+$/.test(value)) return parseInt(value, 10);
@@ -523,6 +579,10 @@ async function main(): Promise<void> {
           console.log(JSON.stringify({ name: pkg.name, version: VERSION }));
         } else {
           console.log(`enke-cli ${VERSION}`);
+          if (VERBOSE) {
+            console.log(`  binary: ${currentBinaryPath()}`);
+            console.log(`  node:   ${process.version} (${process.execPath})`);
+          }
         }
         break;
       }
@@ -538,11 +598,15 @@ async function main(): Promise<void> {
             latest: latest ?? "unknown",
             upToDate,
           }));
-        } else if (upToDate) {
-          console.log(`✓ enke-cli is up to date (${VERSION}).`);
         } else {
-          console.log(`enke-cli ${VERSION} → ${latest} available.`);
-          console.log(`Run: npm install -g enke-cli`);
+          if (upToDate) {
+            console.log(`✓ enke-cli is up to date (${VERSION}).`);
+          } else {
+            console.log(`enke-cli ${VERSION} → ${latest} available.`);
+            console.log(`Run: npm install -g enke-cli`);
+          }
+          // The update is only as good as the install PATH resolves to.
+          printInstallDiagnostics(!upToDate);
         }
         break;
       }
