@@ -1,6 +1,6 @@
 {
   "name": "enke-sdk",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "description": "Shared SDK for en.ke CLI and MCP Server \u2014 auth, API client, types",
   "type": "module",
   "main": "dist/index.js",

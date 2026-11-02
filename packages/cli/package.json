@@ -13,11 +13,12 @@
   "scripts": {
     "build": "tsc && node scripts/bundle.mjs",
     "type-check": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "enke-sdk": "^1.5.4",
+    "enke-sdk": "^1.5.6",
     "zod": "^3.23.0"
   },
   "devDependencies": {
